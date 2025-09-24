@@ -257,11 +257,14 @@ Bubbles-WechatAI/
 ├── ai_providers/       # AI 模块
 │   ├── ai_name.py      # AI 模型接口实现
 │   └── ...
-├── commands/           # 命令系统
-│   ├── registry.py     # 正则命令注册
-│   ├── handlers.py     # 命令处理函数
-│   ├── ai_router.py    # AI智能路由器
-│   ├── ai_functions.py # AI路由功能注册
+├── commands/           # 命令辅助模块（保留上下文、闲聊等遗留逻辑）
+│   ├── context.py
+│   ├── handlers.py
+│   └── ...
+├── function_calls/     # 标准 Function Call 架构
+│   ├── handlers.py     # 工具注册入口
+│   ├── services/       # 业务逻辑封装
+│   ├── router.py       # 函数路由器
 │   └── ...
 ├── data/               # 数据文件
 │ 
@@ -274,101 +277,13 @@ Bubbles-WechatAI/
 
 ### ✨ 如何添加新功能
 
-本项目提供两种方式添加新功能：
+当前架构基于统一的 Function Call 体系，开发流程如下：
 
-```mermaid
-graph LR
-    A[新功能] --> B{选择路由方式}
-    B --> C[命令路由]
-    B --> D[AI路由]
-    
-    C --> E[精确匹配]
-    C --> F[固定格式命令]
-    C --> G[例如:天气北京]
-    
-    D --> H[自然语言理解]
-    D --> I[灵活表达]
-    D --> J[例如:北京天气怎么样]
-    
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style C fill:#bbf,stroke:#333,stroke-width:2px
-    style D fill:#bfb,stroke:#333,stroke-width:2px
-```
+1. **定义参数模型**：在 `function_calls/models.py` 中添加 `BaseModel` 子类，描述工具所需字段。
+2. **实现业务服务**：在 `function_calls/services/` 下编写纯函数，封装真实业务逻辑并返回文本描述。
+3. **注册处理器**：在 `function_calls/handlers.py` 使用 `@tool_function` 装饰器注册工具，返回 `FunctionResult`。
+4. **了解更多**：详见 `FUNCTION_CALL_USAGE.md`，其中记录了多轮函数调用流程与调试建议。
 
-#### 方式一：使用命令路由系统（适合有明确触发词的功能）
-
-1.  **定义功能逻辑 (可选但推荐)**:
-    *   如果你的功能逻辑比较复杂，建议在 `function/` 目录下创建一个新的 Python 文件 (例如 `func_your_feature.py`)。
-    *   在这个文件中实现你的核心功能代码，例如定义类或函数。这有助于保持代码结构清晰。
-
-2.  **创建命令处理器**:
-    *   打开 `commands/handlers.py` 文件。
-    *   添加一个新的处理函数，例如 `handle_your_feature(ctx: 'MessageContext', match: Optional[Match]) -> bool:`。
-    *   这个函数接收 `MessageContext` (包含消息上下文信息) 和 `match` (正则表达式匹配结果) 作为参数。
-    *   在函数内部，你可以：
-        *   调用你在 `function/` 目录下创建的功能模块。
-        *   使用 `ctx.send_text()` 发送回复消息。
-        *   根据需要处理 `match` 对象提取用户输入的参数。
-        *   函数应返回 `True` 表示命令已被处理，`False` 则表示未处理 (会继续尝试匹配后续命令或进行闲聊)。
-    *   确保从 `function` 目录导入必要的模块。
-
-3.  **注册命令**:
-    *   打开 `commands/registry.py` 文件。
-    *   在 `COMMANDS` 列表中，按照优先级顺序添加一个新的 `Command` 对象。
-    *   配置 `Command` 参数：
-        *   `name`: 命令的唯一标识名 (小写下划线)。
-        *   `pattern`: 用于匹配用户输入的正则表达式 (`re.compile`)。注意捕获用户参数。
-        *   `scope`: 命令适用范围 (`"group"`, `"private"`, `"both"`)。
-        *   `need_at`: 在群聊中是否需要 `@` 机器人才能触发 (`True`/`False`)。
-        *   `priority`: 命令的优先级 (数字越小越优先匹配)。
-        *   `handler`: 指向你在 `handlers.py` 中创建的处理函数 (例如 `handle_your_feature`)。
-        *   `description`: 命令的简短描述，用于帮助信息。
-    *   确保从 `handlers.py` 导入你的新处理函数。
-
-4.  **更新帮助信息 (可选)**:
-    *   如果希望用户能在 `帮助` 命令中看到你的新功能，可以更新 `commands/handlers.py` 中的 `handle_help` 函数，将新命令的用法添加到帮助文本中。
-
-#### 方式二：使用AI智能路由（适合自然语言交互的功能）
-
-AI路由系统让用户可以用自然语言触发功能，无需记住特定命令格式：
-
-1. **实现功能逻辑**:
-   * 在 `function/` 目录下创建功能模块（如已有则跳过）
-
-2. **注册AI路由功能**:
-   * 打开 `commands/ai_functions.py`
-   * 使用装饰器注册你的功能：
-   ```python
-   @ai_router.register(
-       name="your_function_name",
-       description="功能描述（AI会根据这个判断用户意图）",
-       examples=[
-           "示例用法1",
-           "示例用法2",
-           "示例用法3"
-       ],
-       params_description="参数说明"
-   )
-   def ai_handle_your_function(ctx: MessageContext, params: str) -> bool:
-       # params 是AI从用户输入中提取的参数
-       # 调用你的功能逻辑
-       # 使用 ctx.send_text() 发送回复
-       return True
-   ```
-
-3. **工作原理**:
-   * 用户发送消息时，如果正则路由未匹配，AI会分析用户意图
-   * AI根据功能描述和示例，判断应该调用哪个功能
-   * AI会自动提取参数并传递给功能处理函数
-
-例如，注册了天气查询功能后，用户可以说：
-- "北京天气怎么样"
-- "查一下上海的天气"
-- "明天深圳会下雨吗"
-
-AI都能理解并调用天气查询功能。
-
-完成以上步骤后，重启机器人即可测试你的新功能！
 
 ## 📄 许可证
 

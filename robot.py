@@ -28,15 +28,13 @@ from constants import ChatType
 from job_mgmt import Job
 from function.func_xml_process import XmlProcessor
 
-# 导入命令路由系统
+# 导入命令上下文与闲聊处理
 from commands.context import MessageContext
-from commands.router import CommandRouter
-from commands.registry import COMMANDS, get_commands_info
 from commands.handlers import handle_chitchat  # 导入闲聊处理函数
 
-# 导入AI路由系统
-from commands.ai_router import ai_router
-import commands.ai_functions  # 导入以注册所有AI功能
+# 导入新的Function Call系统
+from function_calls.router import FunctionCallRouter
+import function_calls.init_handlers  # 导入以注册所有Function Call处理器
 
 __version__ = "39.2.4.0"
 
@@ -165,12 +163,11 @@ class Robot(Job):
         # 初始化图像生成管理器
         self.image_manager = ImageGenerationManager(self.config, self.wcf, self.LOG, self.sendTextMsg)
         
-        # 初始化命令路由器
-        self.command_router = CommandRouter(COMMANDS, robot_instance=self)
-        self.LOG.info(f"命令路由系统初始化完成，共加载 {len(COMMANDS)} 条命令")
-        
-        # 初始化AI路由器
-        self.LOG.info(f"AI路由系统初始化完成，共加载 {len(ai_router.functions)} 个AI功能")
+        # 初始化Function Call路由器
+        self.function_call_router = FunctionCallRouter(robot_instance=self)
+        from function_calls.registry import list_functions
+        functions = list_functions()
+        self.LOG.info(f"Function Call路由系统初始化完成，共注册 {len(functions)} 个函数")
         
         # 初始化提醒管理器
         try:
@@ -212,23 +209,27 @@ class Robot(Job):
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
             
-            # 5. 使用命令路由器分发处理消息
-            handled = self.command_router.dispatch(ctx)
-            
-            # 6. 如果正则路由器没有处理，尝试AI路由器
-            if not handled:
-                # 只在被@或私聊时才使用AI路由
-                if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
-                    print(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
-                    ai_handled = ai_router.dispatch(ctx)
-                    print(f"[AI路由调试] AI路由器处理结果: {ai_handled}")
-                    if ai_handled:
-                        self.LOG.info("消息已由AI路由器处理")
-                        print("[AI路由调试] 消息已成功由AI路由器处理")
-                        return
-                    else:
-                        print("[AI路由调试] AI路由器未处理该消息")
-            
+            # 5. 根据配置选择路由系统
+            handled = False
+
+            function_call_config = getattr(self.config, 'FUNCTION_CALL_ROUTER', {})
+            use_function_call = function_call_config.get('enable', True)
+            debug_function_call = function_call_config.get('debug', False)
+
+            if use_function_call:
+                try:
+                    if debug_function_call:
+                        self.LOG.debug(f"[Function Call] 开始处理消息: {msg.content}")
+                    handled = self.function_call_router.dispatch(ctx)
+                    if debug_function_call:
+                        self.LOG.debug(f"[Function Call] 处理结果: {handled}")
+                except Exception as e:
+                    self.LOG.error(f"Function Call路由器处理异常: {e}")
+
+            if handled:
+                self.LOG.info("消息已由Function Call路由器处理")
+                return
+
             # 7. 如果没有命令处理器处理，则进行特殊逻辑处理
             if not handled:
                 # 7.1 好友请求自动处理
@@ -672,4 +673,3 @@ class Robot(Job):
         
         self.LOG.debug(f"预处理消息: text='{ctx.text}', is_group={ctx.is_group}, is_at_bot={ctx.is_at_bot}, sender='{ctx.sender_name}', is_quoted_image={is_quoted_image}")
         return ctx
-

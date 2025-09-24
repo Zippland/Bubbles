@@ -32,8 +32,6 @@ logging.getLogger("httpx").setLevel(logging.ERROR)     # 提高为 ERROR
 logging.getLogger("Weather").setLevel(logging.WARNING)
 logging.getLogger("ai_providers").setLevel(logging.WARNING)
 logging.getLogger("commands").setLevel(logging.WARNING)
-# 临时调试：为AI路由器设置更详细的日志级别
-logging.getLogger("commands.ai_router").setLevel(logging.INFO)
 
 from function.func_report_reminder import ReportReminder
 from configuration import Config

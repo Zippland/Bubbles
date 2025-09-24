@@ -7,6 +7,7 @@ import base64
 import os
 from datetime import datetime
 import time # 引入 time 模块
+from typing import Any, Dict, List
 
 import httpx
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI
@@ -135,6 +136,38 @@ class ChatGPT():
             rsp = "发生未知错误"
 
         return rsp
+
+    def call_with_functions(self, messages: List[Dict[str, Any]], functions: list, wxid: str):
+        """
+        使用函数调用功能的ChatGPT接口
+
+        Args:
+            message: 用户消息
+            functions: 函数定义列表
+            wxid: 用户ID
+
+        Returns:
+            OpenAI响应对象
+        """
+        try:
+            # 调用函数调用接口
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "functions": functions,
+                "function_call": "auto"
+            }
+
+            # 只有非o系列模型才设置temperature
+            if not self.model.startswith("o"):
+                params["temperature"] = 0.2
+
+            response = self.client.chat.completions.create(**params)
+            return response
+
+        except Exception as e:
+            self.LOG.error(f"函数调用失败: {e}")
+            raise e
 
     def encode_image_to_base64(self, image_path: str) -> str:
         """将图片文件转换为Base64编码

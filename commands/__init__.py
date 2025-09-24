@@ -1,11 +1,8 @@
 # commands package
 """
-命令路由系统包
+命令辅助模块
 
-此包包含了命令路由系统的所有组件:
+该包保留了消息上下文与部分遗留处理器，供 Function Call 架构复用:
 - context: 消息上下文类
-- models: 命令数据模型
-- router: 命令路由器
-- registry: 命令注册表
-- handlers: 命令处理函数
+- handlers: 基础命令/闲聊逻辑
 """ 

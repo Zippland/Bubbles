@@ -49,43 +49,6 @@ def handle_help(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     # 发送消息
     return ctx.send_text(help_text)
 
-def handle_check_equipment(ctx: 'MessageContext', match: Optional[Match]) -> bool:
-    """
-    处理 "查看装备" 命令
-    
-    匹配: 我的装备/查看装备
-    """
-    if not ctx.is_group:
-        ctx.send_text("❌ 装备查看功能只支持群聊")
-        return True
-    
-    try:
-        from function.func_duel import DuelRankSystem
-        
-        player_name = ctx.sender_name
-        rank_system = DuelRankSystem(ctx.msg.roomid)
-        player_data = rank_system.get_player_data(player_name)
-        
-        if not player_data:
-            ctx.send_text(f"⚠️ 没有找到 {player_name} 的数据")
-            return True
-        
-        items = player_data.get("items", {"elder_wand": 0, "magic_stone": 0, "invisibility_cloak": 0})
-        result = [
-            f"🧙‍♂️ {player_name} 的魔法装备:",
-            f"🪄 老魔杖: {items.get('elder_wand', 0)}次 ",
-            f"💎 魔法石: {items.get('magic_stone', 0)}次",
-            f"🧥 隐身衣: {items.get('invisibility_cloak', 0)}次 "
-        ]
-        
-        ctx.send_text("\n".join(result))
-        
-        return True
-    except Exception as e:
-        if ctx.logger:
-            ctx.logger.error(f"查看装备出错: {e}")
-        ctx.send_text("⚠️ 查看装备失败")
-        return False
 
 def handle_summary(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     """
