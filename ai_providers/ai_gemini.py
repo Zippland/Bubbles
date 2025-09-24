@@ -206,7 +206,12 @@ class Gemini:
 
         return rsp_text.strip()
 
-    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None) -> str:
+    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None, tools=None):
+        # Function Call支持检查
+        if tools:
+            # Gemini暂时不支持function calling，返回提示
+            return "当前Gemini模型暂不支持Function Call功能，请使用ChatGPT或DeepSeek模型来使用智能功能。"
+
         if not self._model:
             return "Gemini 模型未成功初始化，请检查配置和网络。"
 

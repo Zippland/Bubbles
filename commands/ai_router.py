@@ -9,12 +9,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AIFunction:
-    """AI可调用的功能定义"""
+    """AI可调用的功能定义 - 最原生实现"""
     name: str                          # 功能唯一标识名
     handler: Callable                  # 处理函数
     description: str                   # 功能描述（给AI看的）
-    examples: list[str] = field(default_factory=list)  # 示例用法
-    params_description: str = ""       # 参数说明
+    parameters: dict = field(default_factory=dict)  # OpenAI function call参数定义
+
+    def to_function_schema(self) -> dict:
+        """转换为OpenAI function call schema格式"""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters or {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        }
     
 class AIRouter:
     """AI智能路由器"""
@@ -23,17 +37,28 @@ class AIRouter:
         self.functions: Dict[str, AIFunction] = {}
         self.logger = logger
         
-    def register(self, name: str, description: str, examples: list[str] = None, params_description: str = ""):
+    def register(self, name: str, description: str, parameters: dict = None):
         """
-        装饰器：注册一个功能到AI路由器
-        
+        装饰器：注册一个功能到AI路由器 - 最原生实现
+
+        Args:
+            name: 功能名称
+            description: 功能描述
+            parameters: OpenAI function call参数定义
+
         @ai_router.register(
             name="weather_query",
             description="查询指定城市的天气预报",
-            examples=["北京天气怎么样", "查一下上海的天气", "明天深圳会下雨吗"],
-            params_description="城市名称"
+            parameters={
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "城市名称"}
+                },
+                "required": ["city"]
+            }
         )
-        def handle_weather(ctx: MessageContext, params: str) -> bool:
+        def handle_weather(ctx: MessageContext, **kwargs) -> bool:
+            city = kwargs.get('city')
             # 实现天气查询逻辑
             pass
         """
@@ -42,211 +67,154 @@ class AIRouter:
                 name=name,
                 handler=func,
                 description=description,
-                examples=examples or [],
-                params_description=params_description
+                parameters=parameters or {}
             )
             self.functions[name] = ai_func
-            self.logger.info(f"AI路由器注册功能: {name} - {description}")
+            self.logger.info(f"注册Function Call功能: {name} - {description}")
             return func
-        
+
         return decorator
     
-    def _build_ai_prompt(self) -> str:
-        """构建给AI的系统提示词，包含所有可用功能的信息"""
-        prompt = """你是一个智能路由助手。根据用户的输入，判断用户的意图并返回JSON格式的响应。
-
-        ### 注意：
-        1. 你需要优先判断自己是否可以直接回答用户的问题，如果你可以直接回答，则返回 "chat"，无需返回 "function"
-        2. 如果用户输入中包含多个功能，请优先匹配最符合用户意图的功能。如果无法判断，则返回 "chat"。
-        3. 优先考虑使用 chat 处理，需要外部资料或其他功能逻辑时，再返回 "function"。
-
-        ### 可用的功能列表：
-        """
-        for name, func in self.functions.items():
-            prompt += f"\n- {name}: {func.description}"
-            if func.params_description:
-                prompt += f"\n  参数: {func.params_description}"
-            if func.examples:
-                prompt += f"\n  示例: {', '.join(func.examples[:3])}"
-            prompt += "\n"
-        
-        prompt += """
-        请你分析用户输入，严格按照以下格式返回JSON：
-
-        ### 返回格式：
-
-        1. 如果用户只是聊天或者不匹配任何功能，返回：
-        {
-            "action_type": "chat"
-        }
-        
-        2.如果用户需要使用上述功能之一，返回：
-        {
-            "action_type": "function",
-            "function_name": "上述功能列表中的功能名",
-            "params": "从用户输入中提取的参数"
-        }
-
-        #### 示例：
-        - 用户输入"北京天气怎么样" -> {"action_type": "function", "function_name": "weather_query", "params": "北京"}
-        - 用户输入"看看新闻" -> {"action_type": "function", "function_name": "news_query", "params": ""}
-        - 用户输入"你好" -> {"action_type": "chat"}
-        - 用户输入"查一下Python教程" -> {"action_type": "function", "function_name": "perplexity_search", "params": "Python教程"}
-
-        #### 格式注意事项：
-        1. action_type 只能是 "function" 或 "chat"
-        2. 只返回JSON，无需其他解释
-        3. function_name 必须完全匹配上述功能列表中的名称
-        """
-        return prompt
+    def _build_function_tools(self, functions: Dict[str, AIFunction]) -> list:
+        """构建function call的tools参数"""
+        return [func.to_function_schema() for func in functions.values()]
     
-    def route(self, ctx: MessageContext) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    def handle_standard_function_call(self, ctx: MessageContext) -> bool:
         """
-        AI路由决策
-        
-        返回: (是否处理成功, AI决策结果)
+        标准的OpenAI Function Call实现
+        支持多轮调用、函数结果反馈、AI最终回复
         """
-        print(f"[AI路由器] route方法被调用")
-        
         if not ctx.text:
-            print("[AI路由器] ctx.text为空，返回False")
-            return False, None
-            
-        # 获取AI模型
-        chat_model = getattr(ctx, 'chat', None)
-        if not chat_model:
-            chat_model = getattr(ctx.robot, 'chat', None) if ctx.robot else None
-            
-        if not chat_model:
-            print("[AI路由器] 无可用的AI模型")
-            self.logger.error("AI路由器：无可用的AI模型")
-            return False, None
-        
-        print(f"[AI路由器] 找到AI模型: {type(chat_model)}")
-        
-        try:
-            # 构建系统提示词
-            system_prompt = self._build_ai_prompt()
-            print(f"[AI路由器] 已构建系统提示词，长度: {len(system_prompt)}")
-            
-            # 让AI分析用户意图
-            user_input = f"用户输入：{ctx.text}"
-            print(f"[AI路由器] 准备调用AI分析意图: {user_input}")
-            
-            ai_response = chat_model.get_answer(
-                user_input, 
-                wxid=ctx.get_receiver(),
-                system_prompt_override=system_prompt
-            )
-            
-            print(f"[AI路由器] AI响应: {ai_response}")
-            
-            # 解析AI返回的JSON
-            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
-            if not json_match:
-                self.logger.warning(f"AI路由器：无法从AI响应中提取JSON - {ai_response}")
-                return False, None
-                
-            decision = json.loads(json_match.group(0))
-            
-            # 验证决策格式
-            action_type = decision.get("action_type")
-            if action_type not in ["chat", "function"]:
-                self.logger.warning(f"AI路由器：未知的action_type - {action_type}")
-                return False, None
-            
-            # 如果是功能调用，验证功能名
-            if action_type == "function":
-                function_name = decision.get("function_name")
-                if function_name not in self.functions:
-                    self.logger.warning(f"AI路由器：未知的功能名 - {function_name}")
-                    return False, None
-            
-            self.logger.info(f"AI路由决策: {decision}")
-            return True, decision
-            
-        except json.JSONDecodeError as e:
-            self.logger.error(f"AI路由器：解析JSON失败 - {e}")
-            return False, None
-        except Exception as e:
-            self.logger.error(f"AI路由器：处理异常 - {e}")
-            return False, None
-    
-    def _check_permission(self, ctx: MessageContext) -> bool:
-        """
-        检查是否有权限使用AI路由功能
-        
-        :param ctx: 消息上下文
-        :return: 是否有权限
-        """
-        # 检查是否启用AI路由
-        ai_router_config = getattr(ctx.config, 'AI_ROUTER', {})
-        if not ai_router_config.get('enable', True):
-            self.logger.info("AI路由功能已禁用")
-            return False
-        
-        # 私聊始终允许
-        if not ctx.is_group:
-            return True
-        
-        # 群聊需要检查白名单
-        allowed_groups = ai_router_config.get('allowed_groups', [])
-        current_group = ctx.get_receiver()
-        
-        if current_group in allowed_groups:
-            self.logger.info(f"群聊 {current_group} 在AI路由白名单中，允许使用")
-            return True
-        else:
-            self.logger.info(f"群聊 {current_group} 不在AI路由白名单中，禁止使用")
             return False
 
+        # 获取AI模型
+        chat_model = getattr(ctx, 'chat', None) or getattr(ctx.robot, 'chat', None)
+        if not chat_model:
+            self.logger.error("无可用的AI模型")
+            return False
+
+        try:
+            # 构建所有可用函数的tools
+            tools = self._build_function_tools(self.functions)
+            specific_max_history = getattr(ctx, 'specific_max_history', None)
+
+            # 初始化对话历史
+            conversation = [{"role": "user", "content": ctx.text}]
+
+            # 最多5轮function call，防止无限循环
+            max_iterations = 5
+
+            for iteration in range(max_iterations):
+                self.logger.debug(f"Function Call第{iteration+1}轮")
+
+                # 调用AI模型
+                response = chat_model.get_answer(
+                    question="",  # 使用conversation模式，question可以为空
+                    wxid=ctx.get_receiver(),
+                    tools=tools,
+                    specific_max_history=specific_max_history,
+                    conversation_history=conversation  # 传递完整对话历史
+                )
+
+                # 如果AI直接回复文本（不调用函数）
+                if isinstance(response, str):
+                    at_list = ctx.msg.sender if ctx.is_group else ""
+                    ctx.send_text(response, at_list)
+                    return True
+
+                # 如果AI调用函数
+                if isinstance(response, dict) and 'tool_calls' in response:
+                    tool_calls = response['tool_calls']
+
+                    # 添加assistant消息到对话历史
+                    conversation.append({
+                        "role": "assistant",
+                        "tool_calls": tool_calls
+                    })
+
+                    # 执行所有函数调用
+                    for tool_call in tool_calls:
+                        function_name = tool_call['function']['name']
+                        arguments = json.loads(tool_call['function']['arguments'])
+
+                        self.logger.info(f"执行函数: {function_name}, 参数: {arguments}")
+
+                        # 执行函数
+                        func = self.functions.get(function_name)
+                        if func:
+                            try:
+                                # 调用函数处理器
+                                success = func.handler(ctx, **arguments)
+                                function_result = "执行成功" if success else "执行失败"
+                            except Exception as e:
+                                self.logger.error(f"函数{function_name}执行错误: {e}")
+                                function_result = f"执行错误: {str(e)}"
+                        else:
+                            function_result = f"函数{function_name}不存在"
+
+                        # 添加函数结果到对话历史
+                        conversation.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.get('id', f"call_{function_name}"),
+                            "content": function_result
+                        })
+
+                    # 继续下一轮，让AI基于函数结果继续思考
+                    continue
+
+                # 如果响应格式异常，跳出循环
+                break
+
+            # 如果达到最大迭代次数，让AI生成最终回复
+            if iteration == max_iterations - 1:
+                final_response = chat_model.get_answer(
+                    question="请基于以上函数调用结果，生成最终回复。",
+                    wxid=ctx.get_receiver(),
+                    specific_max_history=specific_max_history,
+                    conversation_history=conversation
+                )
+
+                if isinstance(final_response, str):
+                    at_list = ctx.msg.sender if ctx.is_group else ""
+                    ctx.send_text(final_response, at_list)
+                    return True
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"标准Function Call处理异常: {e}")
+            return False
+    
     def dispatch(self, ctx: MessageContext) -> bool:
         """
-        执行AI路由分发
-        
-        返回: 是否成功处理
+        标准Function Call分发器
         """
-        print(f"[AI路由器] dispatch被调用，消息内容: {ctx.text}")
-        
-        # 检查权限
-        if not self._check_permission(ctx):
-            print("[AI路由器] 权限检查失败，返回False")
+        if not ctx.text:
             return False
-        
-        # 获取AI路由决策
-        success, decision = self.route(ctx)
-        print(f"[AI路由器] route返回 - success: {success}, decision: {decision}")
-        
-        if not success or not decision:
-            print("[AI路由器] route失败或无决策，返回False")
-            return False
-        
-        action_type = decision.get("action_type")
-        
-        # 如果是聊天，返回False让后续处理器处理
-        if action_type == "chat":
-            self.logger.info("AI路由器：识别为聊天意图，交给聊天处理器")
-            return False
-        
-        # 如果是功能调用
-        if action_type == "function":
-            function_name = decision.get("function_name")
-            params = decision.get("params", "")
-            
-            func = self.functions.get(function_name)
-            if not func:
-                self.logger.error(f"AI路由器：功能 {function_name} 未找到")
+
+        # 调用标准Function Call处理
+        success = self.handle_standard_function_call(ctx)
+
+        if not success:
+            # 如果Function Call失败，回退到聊天模式
+            return self._handle_chitchat(ctx)
+
+        return True
+
+    def _handle_chitchat(self, ctx: MessageContext) -> bool:
+        """
+        处理闲聊逻辑 - 最简实现
+        """
+        try:
+            if not ctx.text:
                 return False
-            
-            try:
-                self.logger.info(f"AI路由器：调用功能 {function_name}，参数: {params}")
-                result = func.handler(ctx, params)
-                return result
-            except Exception as e:
-                self.logger.error(f"AI路由器：执行功能 {function_name} 出错 - {e}")
-                return False
-        
-        return False
+
+            # 调用闲聊处理器
+            from .handlers import handle_chitchat
+            return handle_chitchat(ctx, None)
+        except Exception as e:
+            self.logger.error(f"闲聊处理出错: {e}")
+            return False
 
 # 创建全局AI路由器实例
 ai_router = AIRouter()

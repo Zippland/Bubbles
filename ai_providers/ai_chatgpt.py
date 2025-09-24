@@ -56,57 +56,70 @@ class ChatGPT():
                 return True
         return False
 
-    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None) -> str:
-        # 获取并格式化数据库历史记录 
-        api_messages = []
-
-        # 1. 添加系统提示
-        effective_system_prompt = system_prompt_override if system_prompt_override else self.system_content_msg["content"]
-        if effective_system_prompt: # 确保有内容才添加
-             api_messages.append({"role": "system", "content": effective_system_prompt})
-
-        # 添加当前时间提示（可选，但原代码有）
-        now_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        time_mk = "Current time is: " # 或者其他合适的提示
-        api_messages.append({"role": "system", "content": f"{time_mk}{now_time}"})
-
-
-        # 2. 获取并格式化历史消息
-        if self.message_summary and self.bot_wxid:
-            history = self.message_summary.get_messages(wxid)
-
-            # -限制历史消息数量
-            # 优先使用传入的特定限制，如果没有则使用模型默认限制
-            limit_to_use = specific_max_history if specific_max_history is not None else self.max_history_messages
-            self.LOG.debug(f"获取历史记录 for {wxid}, 原始条数: {len(history)}, 使用限制: {limit_to_use}")
-            
-            if limit_to_use is not None and limit_to_use > 0:
-                 history = history[-limit_to_use:] # 取最新的 N 条
-            elif limit_to_use == 0: # 如果设置为0，则不包含历史
-                 history = []
-                 
-            self.LOG.debug(f"应用限制后历史条数: {len(history)}")
-
-            for msg in history:
-                role = "assistant" if msg.get("sender_wxid") == self.bot_wxid else "user"
-                content = msg.get('content', '')
-                if content: # 避免添加空内容
-                    if role == "user":
-                        sender_name = msg.get('sender', '未知用户') # 获取发送者名字，如果不存在则使用默认值
-                        formatted_content = f"{sender_name}: {content}" # 格式化内容，加入发送者名字
-                        api_messages.append({"role": role, "content": formatted_content})
-                    else: # 如果是助手（机器人自己）的消息，则不加名字
-                         api_messages.append({"role": role, "content": content})
+    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None, tools=None, conversation_history=None):
+        # 标准Function Call模式：使用传入的对话历史
+        if conversation_history:
+            api_messages = []
+            # 添加系统提示
+            effective_system_prompt = system_prompt_override if system_prompt_override else self.system_content_msg["content"]
+            if effective_system_prompt:
+                api_messages.append({"role": "system", "content": effective_system_prompt})
+            # 添加当前时间提示
+            now_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            api_messages.append({"role": "system", "content": f"Current time is: {now_time}"})
+            # 使用传入的对话历史
+            api_messages.extend(conversation_history)
         else:
-            self.LOG.warning(f"无法为 wxid={wxid} 获取历史记录，因为 message_summary 或 bot_wxid 未设置。")
+            # 传统模式：从数据库获取历史记录
+            api_messages = []
 
-        # 3. 添加当前用户问题
-        if question: # 确保问题非空
-            api_messages.append({"role": "user", "content": question})
+            # 1. 添加系统提示
+            effective_system_prompt = system_prompt_override if system_prompt_override else self.system_content_msg["content"]
+            if effective_system_prompt: # 确保有内容才添加
+                 api_messages.append({"role": "system", "content": effective_system_prompt})
+
+            # 添加当前时间提示（可选，但原代码有）
+            now_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            time_mk = "Current time is: " # 或者其他合适的提示
+            api_messages.append({"role": "system", "content": f"{time_mk}{now_time}"})
+
+
+            # 2. 获取并格式化历史消息
+            if self.message_summary and self.bot_wxid:
+                history = self.message_summary.get_messages(wxid)
+
+                # -限制历史消息数量
+                # 优先使用传入的特定限制，如果没有则使用模型默认限制
+                limit_to_use = specific_max_history if specific_max_history is not None else self.max_history_messages
+                self.LOG.debug(f"获取历史记录 for {wxid}, 原始条数: {len(history)}, 使用限制: {limit_to_use}")
+
+                if limit_to_use is not None and limit_to_use > 0:
+                     history = history[-limit_to_use:] # 取最新的 N 条
+                elif limit_to_use == 0: # 如果设置为0，则不包含历史
+                     history = []
+
+                self.LOG.debug(f"应用限制后历史条数: {len(history)}")
+
+                for msg in history:
+                    role = "assistant" if msg.get("sender_wxid") == self.bot_wxid else "user"
+                    content = msg.get('content', '')
+                    if content: # 避免添加空内容
+                        if role == "user":
+                            sender_name = msg.get('sender', '未知用户') # 获取发送者名字，如果不存在则使用默认值
+                            formatted_content = f"{sender_name}: {content}" # 格式化内容，加入发送者名字
+                            api_messages.append({"role": role, "content": formatted_content})
+                        else: # 如果是助手（机器人自己）的消息，则不加名字
+                             api_messages.append({"role": role, "content": content})
+            else:
+                self.LOG.warning(f"无法为 wxid={wxid} 获取历史记录，因为 message_summary 或 bot_wxid 未设置。")
+
+            # 3. 添加当前用户问题
+            if question: # 确保问题非空
+                api_messages.append({"role": "user", "content": question})
 
         rsp = ""
         try:
-            # 使用格式化后的 api_messages 
+            # 使用格式化后的 api_messages
             params = {
                 "model": self.model,
                 "messages": api_messages # 使用从数据库构建的消息列表
@@ -116,10 +129,32 @@ class ChatGPT():
             if not self.model.startswith("o"):
                 params["temperature"] = 0.2
 
+            # 如果提供了tools，添加到参数中
+            if tools:
+                params["tools"] = tools
+                params["tool_choice"] = "auto"  # 让AI自动决定是否调用function
+
             ret = self.client.chat.completions.create(**params)
-            rsp = ret.choices[0].message.content
-            rsp = rsp[2:] if rsp.startswith("\n\n") else rsp
-            rsp = rsp.replace("\n\n", "\n")
+
+            # 检查是否有tool_calls
+            if tools and ret.choices[0].message.tool_calls:
+                # 返回tool_calls而不是普通文本
+                return {
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments
+                            }
+                        }
+                        for tool_call in ret.choices[0].message.tool_calls
+                    ]
+                }
+            else:
+                # 普通文本响应
+                rsp = ret.choices[0].message.content or ""
+                rsp = rsp[2:] if rsp.startswith("\n\n") else rsp
+                rsp = rsp.replace("\n\n", "\n")
 
         except AuthenticationError:
             self.LOG.error("OpenAI API 认证失败，请检查 API 密钥是否正确")

@@ -20,7 +20,6 @@ from ai_providers.ai_gemini import Gemini
 from ai_providers.ai_perplexity import Perplexity
 from function.func_weather import Weather
 from function.func_news import News
-from function.func_duel import start_duel, get_rank_list, get_player_stats, change_player_name, DuelManager, attempt_sneak_attack
 from function.func_summary import MessageSummary  # 导入新的MessageSummary类
 from function.func_reminder import ReminderManager  # 导入ReminderManager类
 from configuration import Config
@@ -28,13 +27,8 @@ from constants import ChatType
 from job_mgmt import Job
 from function.func_xml_process import XmlProcessor
 
-# 导入命令路由系统
+# 导入Function Call系统
 from commands.context import MessageContext
-from commands.router import CommandRouter
-from commands.registry import COMMANDS, get_commands_info
-from commands.handlers import handle_chitchat  # 导入闲聊处理函数
-
-# 导入AI路由系统
 from commands.ai_router import ai_router
 import commands.ai_functions  # 导入以注册所有AI功能
 
@@ -54,7 +48,6 @@ class Robot(Job):
         self.wxid = self.wcf.get_self_wxid() # 获取机器人自己的wxid
         self.allContacts = self.getAllContacts()
         self._msg_timestamps = []
-        self.duel_manager = DuelManager(self.sendDuelMsg)
 
         try:
              db_path = "data/message_history.db"
@@ -165,12 +158,8 @@ class Robot(Job):
         # 初始化图像生成管理器
         self.image_manager = ImageGenerationManager(self.config, self.wcf, self.LOG, self.sendTextMsg)
         
-        # 初始化命令路由器
-        self.command_router = CommandRouter(COMMANDS, robot_instance=self)
-        self.LOG.info(f"命令路由系统初始化完成，共加载 {len(COMMANDS)} 条命令")
-        
-        # 初始化AI路由器
-        self.LOG.info(f"AI路由系统初始化完成，共加载 {len(ai_router.functions)} 个AI功能")
+        # Function Call系统已自动加载
+        self.LOG.info(f"🚀 Function Call系统初始化完成，共加载 {len(ai_router.functions)} 个智能功能")
         
         # 初始化提醒管理器
         try:
@@ -181,8 +170,10 @@ class Robot(Job):
         except Exception as e:
             self.LOG.error(f"初始化提醒管理器失败: {e}", exc_info=True)
         
-        # 输出命令列表信息，便于调试
-        # self.LOG.debug(get_commands_info()) # 如果需要在日志中输出所有命令信息，取消本行注释
+        # 输出AI功能列表信息，便于调试
+        if self.LOG.isEnabledFor(logging.DEBUG):
+            for name, func in ai_router.functions.items():
+                self.LOG.debug(f"AI功能: {name} - {func.description} (scope: {func.scope}, need_at: {func.need_at})")
 
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -192,85 +183,43 @@ class Robot(Job):
 
     def processMsg(self, msg: WxMsg) -> None:
         """
-        处理收到的微信消息
+        处理收到的微信消息 - 纯Function Call实现
         :param msg: 微信消息对象
         """
         try:
-            # 1. 使用MessageSummary记录消息(保持不变)
+            # 1. 使用MessageSummary记录消息
             self.message_summary.process_message_from_wxmsg(msg, self.wcf, self.allContacts, self.wxid)
-            
-            # 2. 根据消息来源选择使用的AI模型
-            self._select_model_for_message(msg)
-            
-            # 3. 获取本次对话特定的历史消息限制
-            specific_limit = self._get_specific_history_limit(msg)
-            self.LOG.debug(f"本次对话 ({msg.sender} in {msg.roomid or msg.sender}) 使用历史限制: {specific_limit}")
-            
-            # 4. 预处理消息，生成MessageContext
+
+            # 2. 预处理消息，生成MessageContext
             ctx = self.preprocess(msg)
-            # 确保context能访问到当前选定的chat模型及特定历史限制
             setattr(ctx, 'chat', self.chat)
-            setattr(ctx, 'specific_max_history', specific_limit)
-            
-            # 5. 使用命令路由器分发处理消息
-            handled = self.command_router.dispatch(ctx)
-            
-            # 6. 如果正则路由器没有处理，尝试AI路由器
-            if not handled:
-                # 只在被@或私聊时才使用AI路由
-                if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
-                    print(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
-                    ai_handled = ai_router.dispatch(ctx)
-                    print(f"[AI路由调试] AI路由器处理结果: {ai_handled}")
-                    if ai_handled:
-                        self.LOG.info("消息已由AI路由器处理")
-                        print("[AI路由调试] 消息已成功由AI路由器处理")
-                        return
-                    else:
-                        print("[AI路由调试] AI路由器未处理该消息")
-            
-            # 7. 如果没有命令处理器处理，则进行特殊逻辑处理
-            if not handled:
-                # 7.1 好友请求自动处理
-                if msg.type == 37:  # 好友请求
-                    self.autoAcceptFriendRequest(msg)
+
+            # 3. 直接使用Function Call系统处理所有消息
+            handled = ai_router.dispatch(ctx)
+            if handled:
+                return
+
+            # 4. 特殊系统消息处理
+            if msg.type == 37:  # 好友请求
+                self.autoAcceptFriendRequest(msg)
+                return
+
+            elif msg.type == 10000:
+                # 处理新成员入群
+                if "加入了群聊" in msg.content and msg.from_group():
+                    new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
+                    if new_member_match:
+                        inviter = new_member_match.group(1)
+                        new_member = new_member_match.group(2)
+                        welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
+                        self.sendTextMsg(welcome_msg, msg.roomid)
+                        self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
                     return
-                    
-                # 7.2 系统消息处理
-                elif msg.type == 10000:
-                    # 7.2.1 处理新成员入群
-                    if "加入了群聊" in msg.content and msg.from_group():
-                        new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
-                        if new_member_match:
-                            inviter = new_member_match.group(1)  # 邀请人
-                            new_member = new_member_match.group(2)  # 新成员
-                            # 使用配置文件中的欢迎语，支持变量替换
-                            welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
-                            self.sendTextMsg(welcome_msg, msg.roomid)
-                            self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
-                        return
-                    # 7.2.2 处理新好友添加
-                    elif "你已添加了" in msg.content:
-                        self.sayHiToNewFriend(msg)
-                        return
-                
-                # 7.3 群聊消息，且配置了响应该群
-                if msg.from_group() and msg.roomid in self.config.GROUPS:
-                    # 如果在群里被@了，但命令路由器没有处理，则进行闲聊
-                    if msg.is_at(self.wxid):
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
-                    else:
-                        pass
-                        
-                # 7.4 私聊消息，未被命令处理，进行闲聊
-                elif not msg.from_group() and not msg.from_self():
-                    # 检查是否是文本消息(type 1)或者是包含用户输入的类型49消息
-                    if msg.type == 1 or (msg.type == 49 and ctx.text):
-                        self.LOG.info(f"准备回复私聊消息: 类型={msg.type}, 文本内容='{ctx.text}'")
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
-                    
+                # 处理新好友添加
+                elif "你已添加了" in msg.content:
+                    self.sayHiToNewFriend(msg)
+                    return
+
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)
 
@@ -416,36 +365,12 @@ class Robot(Job):
         for r in receivers:
             self.sendTextMsg(report, r)
 
-    def sendDuelMsg(self, msg: str, receiver: str) -> None:
-        """发送决斗消息，不受消息频率限制，不记入历史记录
-        :param msg: 消息字符串
-        :param receiver: 接收人wxid或者群id
-        """
-        try:
-            self.wcf.send_text(f"{msg}", receiver, "")
-        except Exception as e:
-            self.LOG.error(f"发送决斗消息失败: {e}")
-
     def cleanup_perplexity_threads(self):
         """清理所有Perplexity线程"""
         # 如果已初始化Perplexity实例，调用其清理方法
         perplexity_instance = self.get_perplexity_instance()
         if perplexity_instance:
             perplexity_instance.cleanup()
-        
-        # 检查并等待决斗线程结束
-        if hasattr(self, 'duel_manager') and self.duel_manager.is_duel_running():
-            self.LOG.info("等待决斗线程结束...")
-            # 最多等待5秒
-            for i in range(5):
-                if not self.duel_manager.is_duel_running():
-                    break
-                time.sleep(1)
-                
-            if self.duel_manager.is_duel_running():
-                self.LOG.warning("决斗线程在退出时仍在运行")
-            else:
-                self.LOG.info("决斗线程已结束")
                 
     def cleanup(self):
         """清理所有资源，在程序退出前调用"""
@@ -485,7 +410,6 @@ class Robot(Job):
             return self.chat_models[ChatType.PERPLEXITY.value]
             
         return None
-    
 
     def _select_model_for_message(self, msg: WxMsg) -> None:
         """根据消息来源选择对应的AI模型
@@ -493,17 +417,17 @@ class Robot(Job):
         """
         if not hasattr(self, 'chat_models') or not self.chat_models:
             return  # 没有可用模型，无需切换
-            
+
         # 获取消息来源ID
         source_id = msg.roomid if msg.from_group() else msg.sender
-        
+
         # 检查配置
         if not hasattr(self.config, 'GROUP_MODELS'):
             # 没有配置，使用默认模型
             if self.default_model_id in self.chat_models:
                 self.chat = self.chat_models[self.default_model_id]
             return
-            
+
         # 群聊消息处理
         if msg.from_group():
             model_mappings = self.config.GROUP_MODELS.get('mapping', [])
@@ -536,24 +460,24 @@ class Robot(Job):
                         if self.default_model_id in self.chat_models:
                             self.chat = self.chat_models[self.default_model_id]
                     return
-        
+
         # 如果没有找到对应配置，使用默认模型
         if self.default_model_id in self.chat_models:
             self.chat = self.chat_models[self.default_model_id]
-            
+
     def _get_specific_history_limit(self, msg: WxMsg) -> int:
         """根据消息来源和配置，获取特定的历史消息数量限制
-        
+
         :param msg: 微信消息对象
         :return: 历史消息数量限制，如果没有特定配置则返回None
         """
         if not hasattr(self.config, 'GROUP_MODELS'):
             # 没有配置，使用当前模型默认值
             return getattr(self.chat, 'max_history_messages', None)
-            
+
         # 获取消息来源ID
         source_id = msg.roomid if msg.from_group() else msg.sender
-        
+
         # 确定查找的映射和字段名
         if msg.from_group():
             mappings = self.config.GROUP_MODELS.get('mapping', [])
@@ -561,7 +485,7 @@ class Robot(Job):
         else:
             mappings = self.config.GROUP_MODELS.get('private_mapping', [])
             key_field = 'wxid'
-            
+
         # 在映射中查找特定配置
         for mapping in mappings:
             if mapping.get(key_field) == source_id:
@@ -574,7 +498,7 @@ class Robot(Job):
                     # 找到了配置但没有max_history，使用模型默认值
                     self.LOG.debug(f"为 {source_id} 找到映射但无特定历史限制，使用模型默认值")
                     break
-                    
+
         # 没有找到特定限制，使用当前模型的默认值
         default_limit = getattr(self.chat, 'max_history_messages', None)
         self.LOG.debug(f"未找到 {source_id} 的特定历史限制，使用模型默认值: {default_limit}")

@@ -341,7 +341,7 @@ class Perplexity:
             return all(value is not None for key, value in args.items() if key != 'proxy')
         return False
         
-    def get_answer(self, prompt, session_id=None):
+    def get_answer(self, prompt, session_id=None, wxid=None, system_prompt_override=None, specific_max_history=None, tools=None):
         """获取Perplexity回答
         
         Args:
@@ -351,6 +351,11 @@ class Perplexity:
         Returns:
             str: Perplexity的回答
         """
+        # Function Call支持检查
+        if tools:
+            # Perplexity暂时不支持function calling，返回提示
+            return "当前Perplexity模型暂不支持Function Call功能，请使用ChatGPT或DeepSeek模型来使用智能功能。"
+
         try:
             if not self.api_key or not self.client:
                 return "Perplexity API key 未配置或客户端初始化失败"
