@@ -63,17 +63,18 @@ class MessageContext:
         """获取应答接收者ID (群聊返回群ID，私聊返回用户ID)"""
         return self.msg.roomid if self.is_group else self.msg.sender
     
-    def send_text(self, content: str, at_list: str = "") -> bool:
+    def send_text(self, content: str, at_list: str = "", record_message: bool = True) -> bool:
         """
         发送文本消息
         :param content: 消息内容
         :param at_list: 要@的用户列表，多个用逗号分隔
+        :param record_message: 是否将消息记录到数据库
         :return: 是否发送成功
         """
         if self.robot and hasattr(self.robot, "sendTextMsg"):
             receiver = self.get_receiver()
             try:
-                self.robot.sendTextMsg(content, receiver, at_list)
+                self.robot.sendTextMsg(content, receiver, at_list, record_message=record_message)
                 return True
             except Exception as e:
                 if self.logger:
@@ -86,4 +87,4 @@ class MessageContext:
                 self.logger.error("Robot实例不存在或没有sendTextMsg方法")
             else:
                 print("Robot实例不存在或没有sendTextMsg方法")
-            return False 
+            return False

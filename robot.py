@@ -270,7 +270,7 @@ class Robot(Job):
             )
             if reasoning_triggered:
                 self.LOG.info("检测到推理模式触发词，跳过AI路由。")
-                ctx.send_text("正在深度思考，请稍候...")
+                ctx.send_text("正在深度思考，请稍候...", record_message=False)
 
                 previous_ctx_chat = ctx.chat
                 reasoning_chat = self._get_reasoning_chat_model()
@@ -368,11 +368,12 @@ class Robot(Job):
         self.wcf.enable_receiving_msg()
         Thread(target=innerProcessMsg, name="GetMessage", args=(self.wcf,), daemon=True).start()
 
-    def sendTextMsg(self, msg: str, receiver: str, at_list: str = "") -> None:
+    def sendTextMsg(self, msg: str, receiver: str, at_list: str = "", record_message: bool = True) -> None:
         """ 发送消息并记录
         :param msg: 消息字符串
         :param receiver: 接收人wxid或者群id
         :param at_list: 要@的wxid, @所有人的wxid为：notify@all
+        :param record_message: 是否将本条消息写入消息历史
         """
         # 延迟和频率限制 (逻辑不变)
         time.sleep(float(str(time.time()).split('.')[-1][-2:]) / 100.0 + 0.3)
@@ -404,18 +405,19 @@ class Robot(Job):
                 self.LOG.info(f"To {receiver}:\n{ats}\n{msg}")
                 self.wcf.send_text(full_msg_content, receiver, at_list)
 
-            if self.message_summary: # 检查 message_summary 是否初始化成功
-                 # 确定机器人的名字
-                 robot_name = self.allContacts.get(self.wxid, "机器人")
-                 # 使用 self.wxid 作为 sender_wxid
-                 # 注意：这里不生成时间戳，让 record_message 内部生成
-                 self.message_summary.record_message(
-                     chat_id=receiver,
-                     sender_name=robot_name,
-                     sender_wxid=self.wxid, # 传入机器人自己的 wxid
-                     content=message_to_send
-                 )
-                 self.LOG.debug(f"已记录机器人发送的消息到 {receiver}")
+            if self.message_summary:
+                if record_message:  # 仅在需要时记录消息
+                    # 确定机器人的名字
+                    robot_name = self.allContacts.get(self.wxid, "机器人")
+                    # 使用 self.wxid 作为 sender_wxid
+                    # 注意：这里不生成时间戳，让 record_message 内部生成
+                    self.message_summary.record_message(
+                        chat_id=receiver,
+                        sender_name=robot_name,
+                        sender_wxid=self.wxid, # 传入机器人自己的 wxid
+                        content=message_to_send
+                    )
+                    self.LOG.debug(f"已记录机器人发送的消息到 {receiver}")
             else:
                 self.LOG.warning("MessageSummary 未初始化，无法记录发送的消息")
 

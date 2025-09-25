@@ -207,7 +207,7 @@ class PerplexityManager:
                 return False
             
             # 发送等待消息
-            send_text_func("正在联网查询，请稍候...")
+            send_text_func("正在联网查询，请稍候...", record_message=False)
             
             # 添加线程完成回调，自动清理线程
             def thread_finished_callback():
