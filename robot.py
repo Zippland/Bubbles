@@ -263,7 +263,11 @@ class Robot(Job):
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
             
-            reasoning_triggered = bool(ctx.text and "想想" in ctx.text)
+            reasoning_triggered = bool(
+                ctx.text
+                and "想想" in ctx.text
+                and (not ctx.is_group or ctx.is_at_bot)
+            )
             if reasoning_triggered:
                 self.LOG.info("检测到推理模式触发词，跳过AI路由。")
                 ctx.send_text("正在深度思考，请稍候...")
