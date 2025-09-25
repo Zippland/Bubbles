@@ -8,7 +8,6 @@ from collections import deque
 import sqlite3  # 添加sqlite3模块
 import os  # 用于处理文件路径
 from function.func_xml_process import XmlProcessor  # 导入XmlProcessor
-# from commands.registry import COMMANDS # 不再需要导入命令列表
 
 class MessageSummary:
     """消息总结功能类 (使用SQLite持久化)

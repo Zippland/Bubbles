@@ -33,31 +33,16 @@
 
 Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https://github.com/lich0821/wcferry) 和 [WechatRobot](https://github.com/lich0821/wechatrobot) 开发，支持接入多种LLM，提供丰富的交互功能和定时任务。该项目旨在将微信客户端转变为一个智能的个人助手，可以执行多种实用功能，带来便捷的用户体验。
 
-和一般机器人框架不同的是，Bubbles 设计了两套灵活的路由系统：
+和一般机器人框架不同的是，Bubbles 构建了一套基于 AI 的智能路由系统：AI 会读取所有已注册的功能描述，自动判断用户想要执行的操作并调用对应的处理函数。添加新功能时，只需要编写处理逻辑并通过装饰器注册到 AI 路由，无需在消息处理流程里额外写分支逻辑。
 
-1. **命令路由系统** - 基于正则表达式的精确命令匹配，适合有明确触发词的功能
-2. **AI智能路由系统** - 基于AI的自然语言理解，自动识别用户意图并调用相应功能
-
-通过这两套路由系统，同一个功能函数，可以让 ai 有两种方式进行调用。这不但使得添加新功能变得极其简单，且不需要改动原有代码。相当于给一个主线 Hub 添加插件，让海量的、不同种类的工具都能集成到 AI 里。
-
-路由系统是本项目的核心，通过它，理论上可以实现任何操作。
-
-已实现的操作详见 **如何添加新功能** 章节。
+这套路由机制是项目的核心，使得机器人可以在保持主线稳定的同时，快速接入数量众多、类型各异的工具。已实现的功能示例见 **如何添加新功能** 章节。
 
 ## 案例演示
-#### 案例演示其一：使用自然语言设置提醒（命令路由）
+#### 案例演示：使用自然语言设置提醒（AI 智能路由）
 
 结构：
 
-用户输入 -> 击中命令 -> 调用命令函数 -> agent分析 -> agent格式化输出 -> 选择函数 -> 格式解析 -> 函数循环调用 -> 数据库持久化 -> 结果回调
-
-<img src="img_1.jpg" width="400"/> 
-
-#### 案例演示其二：使用自然语言设置提醒（AI 智能路由）
-
-结构：
-
-用户输入 -> 未击中命令 -> agent路由选择 -> 满足功能要求 -> agent格式化输出 -> 格式解析 -> 函数调用 -> 接口访问 -> 查询数据 -> 数据库持久化 -> 结果回调
+用户输入 -> AI 路由决策 -> 满足功能要求 -> agent格式化输出 -> 格式解析 -> 函数调用 -> 接口访问 -> 查询数据 -> 数据库持久化 -> 结果回调
 
 <img src="img_3.png" width="400"/> 
 
@@ -69,47 +54,37 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
   - DeepSeek
   - Gemini
 
-#### 🛠️ 双重路由系统
-- **命令路由系统**：基于正则表达式的精确匹配，高效处理特定命令
-- **AI智能路由**：自然语言理解，无需记住特定命令格式
-- 支持自定义命令及参数
-- 预设 [多种实用和娱乐命令](#可用命令)
+#### 🛠️ 智能路由系统
+- 基于 AI 的意图识别，无需记住特定命令格式
+- 支持为功能提供描述、示例和参数说明，帮助模型精准调用
+- 通过装饰器注册新功能即可扩展机器人能力
 
 #### 路由系统架构图
 
 ```mermaid
 flowchart TD
     A[User Message] --> B[Message Preprocessing]
-    B --> C{At Bot or Private Chat?}
-    
-    C -->|Yes| D[Command Router]
-    C -->|No| E[Ignore Message]
-    
-    D --> F{Regex Match?}
-    F -->|Yes| G[Execute Command Handler]
-    F -->|No| H[AI Router]
-    
-    H --> I[AI Analyze Intent]
-    I --> J{Function Match?}
-    J -->|Yes| K[Call Function]
-    J -->|No| L[Chat Mode]
-    
-    G --> M[Return Result]
-    K --> M
-    L --> N[AI Conversation]
-    N --> M
-    
+    B --> C{私聊或@机器人?}
+    C -->|No| D[忽略消息]
+    C -->|Yes| E[AI Router]
+    E --> F[AI Analyze Intent]
+    F --> G{Function Decision?}
+    G -->|Function| H[Call Registered Handler]
+    G -->|Chat| I[AI Conversation]
+    H --> J[Return Result]
+    I --> J
+
     style A fill:#f9f,stroke:#333,stroke-width:2px
-    style D fill:#bbf,stroke:#333,stroke-width:2px
-    style H fill:#bfb,stroke:#333,stroke-width:2px
-    style M fill:#fbb,stroke:#333,stroke-width:2px
+    style E fill:#bfb,stroke:#333,stroke-width:2px
+    style H fill:#bbf,stroke:#333,stroke-width:2px
+    style J fill:#fbb,stroke:#333,stroke-width:2px
 ```
 
 消息处理流程说明：
-1. **消息预处理**：系统接收用户消息，判断是否需要响应
-2. **命令路由优先**：首先尝试使用正则表达式匹配已注册的命令
-3. **AI路由兜底**：如果没有匹配到命令，则使用AI分析用户意图
-4. **智能分发**：AI可以理解自然语言并调用相应功能，或进入聊天模式
+1. **消息预处理**：系统接收用户消息，提取纯文本、发送者等上下文
+2. **权限判断**：仅在私聊或群聊中被 @ 时才进入 AI 路由，避免打扰其他群成员
+3. **AI 决策**：大模型根据功能描述判断是否调用某个功能或直接聊天
+4. **结果输出**：调用成功的功能会返回处理结果，否则使用默认闲聊响应
 
 ### ⏰ 定时任务与提醒功能
 - 每日天气预报推送
@@ -225,30 +200,23 @@ GROUP_MODELS:
 python main.py
 ```
 
-#### 可用命令（命令路由系统）
+#### 可用功能示例（AI 路由）
 
-机器人支持多种命令，按功能分类如下：
+以下是已经注册到 AI 路由的典型意图，机器人会尽力理解类似的自然语言表述：
 
 ##### 提醒功能
-- `..提醒我..` - 用自然语言设置一个或多个提醒
-- `查看提醒`、`我的提醒`、`提醒列表` - 查看您设置的所有提醒
-- `..删..提醒..` - 用自然语言删除指定的（或所有）提醒
+- “提醒我明天下午三点开会” —— 设置一次性提醒
+- “每天早上 8 点提醒我跑步” —— 支持循环提醒
+- “查看我的提醒” / “我有哪些提醒” —— 查看当前所有提醒
+- “把明天的开会提醒删掉” —— 删除指定提醒
 
-##### 基础系统命令
-- `info`、`帮助`、`指令` - 显示机器人的帮助信息
-- `骂一下 @用户名` - 让机器人骂指定用户（仅群聊）
+##### 搜索与资讯
+- “帮我查查最近的 AI 新闻” —— 使用 Perplexity 进行深度检索
+- “看看今天的新闻” —— 推送最新要闻
 
-##### Perplexity AI 命令
-- `ask 问题内容` - 使用 Perplexity AI 进行深度查询（需@机器人）
-
-##### 消息管理命令
-- `summary`、`/总结` - 总结群聊最近的消息（仅群聊）
-- `clearmessages`、`/清除历史` - 从数据库中清除群聊的历史消息记录（仅群聊）
-
-##### 天气和新闻工具
-- `天气预报 城市名`、`预报 城市名` - 查询指定城市未来几天的天气预报
-- `天气 城市名`、`温度 城市名` - 查询指定城市的当前天气
-- `新闻` - 获取最新新闻
+##### 天气工具
+- “北京天气怎么样”
+- “查一下上海未来几天的天气”
 
 ## 📋 项目结构
 
@@ -257,9 +225,8 @@ Bubbles-WechatAI/
 ├── ai_providers/       # AI 模块
 │   ├── ai_name.py      # AI 模型接口实现
 │   └── ...
-├── commands/           # 命令系统
-│   ├── registry.py     # 正则命令注册
-│   ├── handlers.py     # 命令处理函数
+├── commands/           # 消息上下文与 AI 路由
+│   ├── handlers.py     # 功能处理函数
 │   ├── ai_router.py    # AI智能路由器
 │   ├── ai_functions.py # AI路由功能注册
 │   └── ...
@@ -274,74 +241,18 @@ Bubbles-WechatAI/
 
 ### ✨ 如何添加新功能
 
-本项目提供两种方式添加新功能：
+目前所有新功能均通过 AI 智能路由接入，开发流程如下：
 
-```mermaid
-graph LR
-    A[新功能] --> B{选择路由方式}
-    B --> C[命令路由]
-    B --> D[AI路由]
-    
-    C --> E[精确匹配]
-    C --> F[固定格式命令]
-    C --> G[例如:天气北京]
-    
-    D --> H[自然语言理解]
-    D --> I[灵活表达]
-    D --> J[例如:北京天气怎么样]
-    
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style C fill:#bbf,stroke:#333,stroke-width:2px
-    style D fill:#bfb,stroke:#333,stroke-width:2px
-```
+1. **实现功能逻辑**
+   * 在 `function/` 目录下创建或复用功能模块，封装核心业务逻辑，便于测试和复用。
 
-#### 方式一：使用命令路由系统（适合有明确触发词的功能）
-
-1.  **定义功能逻辑 (可选但推荐)**:
-    *   如果你的功能逻辑比较复杂，建议在 `function/` 目录下创建一个新的 Python 文件 (例如 `func_your_feature.py`)。
-    *   在这个文件中实现你的核心功能代码，例如定义类或函数。这有助于保持代码结构清晰。
-
-2.  **创建命令处理器**:
-    *   打开 `commands/handlers.py` 文件。
-    *   添加一个新的处理函数，例如 `handle_your_feature(ctx: 'MessageContext', match: Optional[Match]) -> bool:`。
-    *   这个函数接收 `MessageContext` (包含消息上下文信息) 和 `match` (正则表达式匹配结果) 作为参数。
-    *   在函数内部，你可以：
-        *   调用你在 `function/` 目录下创建的功能模块。
-        *   使用 `ctx.send_text()` 发送回复消息。
-        *   根据需要处理 `match` 对象提取用户输入的参数。
-        *   函数应返回 `True` 表示命令已被处理，`False` 则表示未处理 (会继续尝试匹配后续命令或进行闲聊)。
-    *   确保从 `function` 目录导入必要的模块。
-
-3.  **注册命令**:
-    *   打开 `commands/registry.py` 文件。
-    *   在 `COMMANDS` 列表中，按照优先级顺序添加一个新的 `Command` 对象。
-    *   配置 `Command` 参数：
-        *   `name`: 命令的唯一标识名 (小写下划线)。
-        *   `pattern`: 用于匹配用户输入的正则表达式 (`re.compile`)。注意捕获用户参数。
-        *   `scope`: 命令适用范围 (`"group"`, `"private"`, `"both"`)。
-        *   `need_at`: 在群聊中是否需要 `@` 机器人才能触发 (`True`/`False`)。
-        *   `priority`: 命令的优先级 (数字越小越优先匹配)。
-        *   `handler`: 指向你在 `handlers.py` 中创建的处理函数 (例如 `handle_your_feature`)。
-        *   `description`: 命令的简短描述，用于帮助信息。
-    *   确保从 `handlers.py` 导入你的新处理函数。
-
-4.  **更新帮助信息 (可选)**:
-    *   如果希望用户能在 `帮助` 命令中看到你的新功能，可以更新 `commands/handlers.py` 中的 `handle_help` 函数，将新命令的用法添加到帮助文本中。
-
-#### 方式二：使用AI智能路由（适合自然语言交互的功能）
-
-AI路由系统让用户可以用自然语言触发功能，无需记住特定命令格式：
-
-1. **实现功能逻辑**:
-   * 在 `function/` 目录下创建功能模块（如已有则跳过）
-
-2. **注册AI路由功能**:
+2. **注册 AI 路由功能**
    * 打开 `commands/ai_functions.py`
-   * 使用装饰器注册你的功能：
+   * 使用装饰器注册功能，提供给模型判定意图所需的描述信息：
    ```python
    @ai_router.register(
        name="your_function_name",
-       description="功能描述（AI会根据这个判断用户意图）",
+       description="功能描述（AI 会根据这个判断用户意图）",
        examples=[
            "示例用法1",
            "示例用法2",
@@ -350,23 +261,23 @@ AI路由系统让用户可以用自然语言触发功能，无需记住特定命
        params_description="参数说明"
    )
    def ai_handle_your_function(ctx: MessageContext, params: str) -> bool:
-       # params 是AI从用户输入中提取的参数
+       # params 是 AI 从用户输入中提取的参数
        # 调用你的功能逻辑
        # 使用 ctx.send_text() 发送回复
        return True
    ```
 
-3. **工作原理**:
-   * 用户发送消息时，如果正则路由未匹配，AI会分析用户意图
-   * AI根据功能描述和示例，判断应该调用哪个功能
-   * AI会自动提取参数并传递给功能处理函数
+3. **理解路由机制**
+   * 用户消息会在私聊或被 @ 时进入 AI 路由
+   * AI 根据 `description`、`examples` 和 `params_description` 选择最合适的功能
+   * `params` 字段由模型提取，可根据需要进一步解析或校验
 
 例如，注册了天气查询功能后，用户可以说：
 - "北京天气怎么样"
 - "查一下上海的天气"
 - "明天深圳会下雨吗"
 
-AI都能理解并调用天气查询功能。
+AI 都能理解并调用天气查询功能。
 
 完成以上步骤后，重启机器人即可测试你的新功能！
 

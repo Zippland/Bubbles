@@ -27,10 +27,8 @@ from constants import ChatType
 from job_mgmt import Job
 from function.func_xml_process import XmlProcessor
 
-# 导入命令路由系统
+# 导入上下文及常用处理函数
 from commands.context import MessageContext
-from commands.router import CommandRouter
-from commands.registry import COMMANDS, get_commands_info
 from commands.handlers import handle_chitchat  # 导入闲聊处理函数
 
 # 导入AI路由系统
@@ -163,10 +161,6 @@ class Robot(Job):
         # 初始化图像生成管理器
         self.image_manager = ImageGenerationManager(self.config, self.wcf, self.LOG, self.sendTextMsg)
         
-        # 初始化命令路由器
-        self.command_router = CommandRouter(COMMANDS, robot_instance=self)
-        self.LOG.info(f"命令路由系统初始化完成，共加载 {len(COMMANDS)} 条命令")
-        
         # 初始化AI路由器
         self.LOG.info(f"AI路由系统初始化完成，共加载 {len(ai_router.functions)} 个AI功能")
         
@@ -179,9 +173,6 @@ class Robot(Job):
         except Exception as e:
             self.LOG.error(f"初始化提醒管理器失败: {e}", exc_info=True)
         
-        # 输出命令列表信息，便于调试
-        # self.LOG.debug(get_commands_info()) # 如果需要在日志中输出所有命令信息，取消本行注释
-
     @staticmethod
     def value_check(args: dict) -> bool:
         if args:
@@ -210,24 +201,21 @@ class Robot(Job):
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
             
-            # 5. 使用命令路由器分发处理消息
-            handled = self.command_router.dispatch(ctx)
-            
-            # 6. 如果正则路由器没有处理，尝试AI路由器
-            if not handled:
-                # 只在被@或私聊时才使用AI路由
-                if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
-                    print(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
-                    ai_handled = ai_router.dispatch(ctx)
-                    print(f"[AI路由调试] AI路由器处理结果: {ai_handled}")
-                    if ai_handled:
-                        self.LOG.info("消息已由AI路由器处理")
-                        print("[AI路由调试] 消息已成功由AI路由器处理")
-                        return
-                    else:
-                        print("[AI路由调试] AI路由器未处理该消息")
-            
-            # 7. 如果没有命令处理器处理，则进行特殊逻辑处理
+            handled = False
+
+            # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）
+            if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
+                print(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
+                handled = ai_router.dispatch(ctx)
+                print(f"[AI路由调试] AI路由器处理结果: {handled}")
+                if handled:
+                    self.LOG.info("消息已由AI路由器处理")
+                    print("[AI路由调试] 消息已成功由AI路由器处理")
+                    return
+                else:
+                    print("[AI路由调试] AI路由器未处理该消息")
+
+            # 6. 如果AI路由器未处理，则进行特殊逻辑处理
             if not handled:
                 # 7.1 好友请求自动处理
                 if msg.type == 37:  # 好友请求
@@ -254,7 +242,7 @@ class Robot(Job):
                 
                 # 7.3 群聊消息，且配置了响应该群
                 if msg.from_group() and msg.roomid in self.config.GROUPS:
-                    # 如果在群里被@了，但命令路由器没有处理，则进行闲聊
+                    # 如果在群里被@了，但AI路由器未处理，则进行闲聊
                     if msg.is_at(self.wxid):
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
                         handle_chitchat(ctx, None)

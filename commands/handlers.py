@@ -755,20 +755,11 @@ def handle_list_reminders(ctx: 'MessageContext', match: Optional[Match]) -> bool
     return True
 
 def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> bool:
-    """
-    处理删除提醒命令（支持群聊和私聊）。
-    检查消息是否包含"提醒"和"删"相关字眼，然后使用 AI 理解具体意图。
-    """
+    """处理删除提醒命令（支持群聊和私聊），通过 AI 理解用户意图并执行操作。"""
     # 1. 获取用户输入的完整内容
     raw_text = ctx.msg.content.strip()
 
-    # 2. 检查是否包含删除提醒的两个核心要素："提醒"和"删/删除/取消"
-    #    Regex 已经保证了后者，这里只需检查前者
-    if "提醒" not in raw_text:
-        # 如果消息匹配了 "删" 但没有 "提醒"，说明不是删除提醒的意图，不处理
-        return False # 返回 False，让命令路由器可以尝试匹配其他命令
-
-    # 3. 检查 ReminderManager 是否存在
+    # 2. 检查 ReminderManager 是否存在
     if not hasattr(ctx.robot, 'reminder_manager'):
         # 这个检查需要保留，是内部依赖
         ctx.send_text("❌ 内部错误：提醒管理器未初始化。", ctx.msg.sender if ctx.is_group else "")
@@ -779,7 +770,7 @@ def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> boo
 
     # --- 核心流程：直接使用 AI 分析 ---
 
-    # 4. 获取用户的所有提醒作为 AI 的上下文
+    # 3. 获取用户的所有提醒作为 AI 的上下文
     reminders = ctx.robot.reminder_manager.list_reminders(ctx.msg.sender)
     if not reminders:
         # 如果用户没有任何提醒，直接告知
@@ -794,7 +785,7 @@ def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> boo
          if ctx.logger: ctx.logger.error(f"序列化提醒列表失败: {e}", exc_info=True)
          return True
 
-    # 5. 构造 AI Prompt (与之前相同，AI 需要能处理所有情况)
+    # 4. 构造 AI Prompt (与之前相同，AI 需要能处理所有情况)
     # 注意：确保 prompt 中的 {{ 和 }} 转义正确
     sys_prompt = """
 你是提醒删除助手。用户会提出删除提醒的请求。我会提供用户的**完整请求原文**，以及一个包含该用户所有当前提醒的 JSON 列表。
@@ -870,7 +861,7 @@ def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> boo
          return True
 
 
-    # 6. 调用 AI (使用完整的用户原始输入)
+    # 5. 调用 AI (使用完整的用户原始输入)
     q_for_ai = f"请根据以下用户完整请求，分析需要删除哪个提醒：\n{raw_text}" # 使用 raw_text
     try:
         if not hasattr(ctx, 'chat') or not ctx.chat:
@@ -903,7 +894,7 @@ def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> boo
             # 获取AI回答
             ai_response = ctx.chat.get_answer(q_for_ai, ctx.get_receiver(), system_prompt_override=formatted_prompt)
 
-            # 7. 解析 AI 的 JSON 回复
+            # 6. 解析 AI 的 JSON 回复
             json_str = None
             json_match_obj = re.search(r'\{.*\}', ai_response, re.DOTALL)
             if json_match_obj:
@@ -932,7 +923,7 @@ def handle_delete_reminder(ctx: 'MessageContext', match: Optional[Match]) -> boo
                     return True
                 # 否则继续下一次循环重试
 
-        # 8. 根据 AI 指令执行操作 (与之前相同)
+        # 7. 根据 AI 指令执行操作 (与之前相同)
         action = parsed_ai_response.get("action")
 
         if action == "delete_specific":
