@@ -24,48 +24,58 @@ def run_perplexity(ctx: MessageContext, query: str) -> PerplexityResult:
     if not perplexity_instance:
         return PerplexityResult(success=True, messages=["❌ Perplexity搜索功能当前不可用"], handled_externally=False)
 
-    content_for_perplexity = f"ask {query}"
     chat_id = ctx.get_receiver()
     sender_wxid = ctx.msg.sender
-    room_id = ctx.msg.roomid if ctx.is_group else None
 
-    captured_messages: list[str] = []
+    def run_fallback(fallback_prompt: str | None) -> PerplexityResult | None:
+        if not fallback_prompt:
+            return None
 
-    def capture_send_text(content: str, at_list: str = "") -> bool:
-        captured_messages.append(content)
-        return True
-
-    was_handled, fallback_prompt = perplexity_instance.process_message(
-        content=content_for_perplexity,
-        chat_id=chat_id,
-        sender=sender_wxid,
-        roomid=room_id,
-        from_group=ctx.is_group,
-        send_text_func=capture_send_text
-    )
-
-    if captured_messages:
-        return PerplexityResult(success=True, messages=captured_messages, handled_externally=False)
-
-    if was_handled:
-        return PerplexityResult(success=True, messages=[], handled_externally=True)
-
-    if fallback_prompt:
         chat_model = getattr(ctx, 'chat', None) or (getattr(ctx.robot, 'chat', None) if ctx.robot else None)
-        if chat_model:
-            try:
-                import time
-                current_time = time.strftime("%H:%M", time.localtime())
-                formatted_question = f"[{current_time}] {ctx.sender_name}: {query}"
-                answer = chat_model.get_answer(
-                    question=formatted_question,
-                    wxid=ctx.get_receiver(),
-                    system_prompt_override=fallback_prompt
-                )
-                if answer:
-                    return PerplexityResult(success=True, messages=[answer], handled_externally=False)
-            except Exception as exc:
-                if ctx.logger:
-                    ctx.logger.error(f"默认AI处理失败: {exc}")
+        if not chat_model:
+            return None
 
-    return PerplexityResult(success=True, messages=["❌ Perplexity搜索时发生错误"], handled_externally=False)
+        try:
+            import time
+
+            current_time = time.strftime("%H:%M", time.localtime())
+            formatted_question = f"[{current_time}] {ctx.sender_name}: {query}"
+            answer = chat_model.get_answer(
+                question=formatted_question,
+                wxid=ctx.get_receiver(),
+                system_prompt_override=fallback_prompt
+            )
+            if answer:
+                return PerplexityResult(success=True, messages=[answer], handled_externally=False)
+        except Exception as exc:
+            if ctx.logger:
+                ctx.logger.error(f"默认AI处理失败: {exc}")
+
+        return None
+
+    if not perplexity_instance.is_allowed(chat_id, sender_wxid, ctx.is_group):
+        fallback_result = run_fallback(perplexity_instance.fallback_prompt)
+        if fallback_result:
+            return fallback_result
+        return PerplexityResult(success=True, messages=["❌ 当前会话未授权使用Perplexity"], handled_externally=False)
+
+    try:
+        answer = perplexity_instance.get_answer(query, chat_id)
+        sanitized = perplexity_instance.sanitize_response(answer) if answer else ""
+        if sanitized:
+            return PerplexityResult(success=True, messages=[sanitized], handled_externally=False)
+
+        fallback_result = run_fallback(perplexity_instance.fallback_prompt)
+        if fallback_result:
+            return fallback_result
+
+        return PerplexityResult(success=True, messages=["❌ Perplexity未返回结果"], handled_externally=False)
+    except Exception as exc:
+        if ctx.logger:
+            ctx.logger.error(f"Perplexity搜索异常: {exc}")
+
+        fallback_result = run_fallback(perplexity_instance.fallback_prompt)
+        if fallback_result:
+            return fallback_result
+
+        return PerplexityResult(success=True, messages=["❌ Perplexity搜索时发生错误"], handled_externally=False)

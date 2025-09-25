@@ -34,12 +34,9 @@ class PerplexityThread(Thread):
         self.at_user = at_user
         self.LOG = logging.getLogger("PerplexityThread")
         
-        # 检查是否使用reasoning模型
-        self.is_reasoning_model = False
-        if hasattr(self.perplexity, 'config'):
-            model_name = self.perplexity.config.get('model', 'sonar').lower()
-            self.is_reasoning_model = 'reasoning' in model_name
-            self.LOG.info(f"Perplexity使用模型: {model_name}, 是否为reasoning模型: {self.is_reasoning_model}")
+        self.LOG.info(
+            f"Perplexity使用模型: {self.perplexity.model_name}, 是否为reasoning模型: {self.perplexity.is_reasoning_model}"
+        )
         
     def run(self):
         """线程执行函数"""
@@ -49,16 +46,12 @@ class PerplexityThread(Thread):
             # 获取回答
             response = self.perplexity.get_answer(self.prompt, self.chat_id)
             
-            # 处理sonar-reasoning和sonar-reasoning-pro模型的<think>标签
             if response:
-                # 只有对reasoning模型才应用清理逻辑
-                if self.is_reasoning_model:
-                    response = self.remove_thinking_content(response)
-                
-                # 移除Markdown格式符号
-                response = self.remove_markdown_formatting(response)
-                
-                self.send_text_func(response, at_list=self.at_user)
+                response = self.perplexity.sanitize_response(response)
+                if response:
+                    self.send_text_func(response, at_list=self.at_user)
+                else:
+                    self.send_text_func("无法从Perplexity获取回答", at_list=self.at_user)
             else:
                 self.send_text_func("无法从Perplexity获取回答", at_list=self.at_user)
                 
@@ -68,105 +61,6 @@ class PerplexityThread(Thread):
             self.LOG.error(f"处理Perplexity请求时出错: {e}")
             self.send_text_func(f"处理请求时出错: {e}", at_list=self.at_user)
     
-    def remove_thinking_content(self, text):
-        """移除<think></think>标签之间的思考内容
-        
-        Args:
-            text: 原始响应文本
-            
-        Returns:
-            str: 处理后的文本
-        """
-        try:
-            # 检查是否包含思考标签
-            has_thinking = '<think>' in text or '</think>' in text
-            
-            if has_thinking:
-                self.LOG.info("检测到思考内容标签，准备移除...")
-                
-                # 导入正则表达式库
-                import re
-                
-                # 移除不完整的标签对情况
-                if text.count('<think>') != text.count('</think>'):
-                    self.LOG.warning(f"检测到不匹配的思考标签: <think>数量={text.count('<think>')}, </think>数量={text.count('</think>')}")
-                
-                # 提取思考内容用于日志记录
-                thinking_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
-                thinking_matches = thinking_pattern.findall(text)
-                
-                if thinking_matches:
-                    for i, thinking in enumerate(thinking_matches):
-                        short_thinking = thinking[:100] + '...' if len(thinking) > 100 else thinking
-                        self.LOG.debug(f"思考内容 #{i+1}: {short_thinking}")
-                
-                # 替换所有的<think>...</think>内容 - 使用非贪婪模式
-                cleaned_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-                
-                # 处理不完整的标签
-                cleaned_text = re.sub(r'<think>.*?$', '', cleaned_text, flags=re.DOTALL)  # 处理未闭合的开始标签
-                cleaned_text = re.sub(r'^.*?</think>', '', cleaned_text, flags=re.DOTALL)  # 处理未开始的闭合标签
-                
-                # 处理可能的多余空行
-                cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
-                
-                # 移除前后空白
-                cleaned_text = cleaned_text.strip()
-                
-                self.LOG.info(f"思考内容已移除，原文本长度: {len(text)} -> 清理后: {len(cleaned_text)}")
-                
-                # 如果清理后文本为空，返回一个提示信息
-                if not cleaned_text:
-                    return "回答内容为空，可能是模型仅返回了思考过程。请重新提问。"
-                
-                return cleaned_text
-            else:
-                return text  # 没有思考标签，直接返回原文本
-                
-        except Exception as e:
-            self.LOG.error(f"清理思考内容时出错: {e}")
-            return text  # 出错时返回原始文本
-            
-    def remove_markdown_formatting(self, text):
-        """移除Markdown格式符号，如*和#
-        
-        Args:
-            text: 包含Markdown格式的文本
-            
-        Returns:
-            str: 移除Markdown格式后的文本
-        """
-        try:
-            # 导入正则表达式库
-            import re
-            
-            self.LOG.info("开始移除Markdown格式符号...")
-            
-            # 保存原始文本长度
-            original_length = len(text)
-            
-            # 移除标题符号 (#)
-            # 替换 # 开头的标题，保留文本内容
-            cleaned_text = re.sub(r'^\s*#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-            
-            # 移除强调符号 (*)
-            # 替换 **粗体** 和 *斜体* 格式，保留文本内容
-            cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
-            
-            # 处理可能的多余空行
-            cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
-            
-            # 移除前后空白
-            cleaned_text = cleaned_text.strip()
-            
-            self.LOG.info(f"Markdown格式符号已移除，原文本长度: {original_length} -> 清理后: {len(cleaned_text)}")
-            
-            return cleaned_text
-            
-        except Exception as e:
-            self.LOG.error(f"移除Markdown格式符号时出错: {e}")
-            return text  # 出错时返回原始文本
 
 
 class PerplexityManager:
@@ -271,6 +165,9 @@ class Perplexity:
         self.trigger_keyword = config.get('trigger_keyword', 'ask')
         self.fallback_prompt = config.get('fallback_prompt', "请像 Perplexity 一样，以专业、客观、信息丰富的方式回答问题。不要使用任何tex或者md格式,纯文本输出。")
         self.LOG = logging.getLogger('Perplexity')
+        self.model = config.get('model', 'sonar')
+        self.model_name = str(self.model).lower()
+        self.is_reasoning_model = 'reasoning' in self.model_name
         
         # 权限控制 - 允许使用Perplexity的群聊和个人ID
         self.allowed_groups = config.get('allowed_groups', [])
@@ -362,7 +259,7 @@ class Perplexity:
             ]
             
             # 获取模型
-            model = self.config.get('model', 'sonar')
+            model = self.model
             
             # 使用json序列化确保正确处理Unicode
             self.LOG.info(f"发送到Perplexity的消息: {json.dumps(messages, ensure_ascii=False)}")
@@ -379,6 +276,77 @@ class Perplexity:
         except Exception as e:
             self.LOG.error(f"调用Perplexity API时发生错误: {str(e)}")
             return f"发生错误: {str(e)}"
+
+    def sanitize_response(self, text: str) -> str:
+        """根据模型类型清理Perplexity响应"""
+        if not isinstance(text, str):
+            return ""
+
+        cleaned = text
+        if self.is_reasoning_model:
+            cleaned = self._remove_thinking_content(cleaned)
+
+        cleaned = self._remove_markdown_formatting(cleaned)
+        return cleaned.strip()
+
+    def _remove_thinking_content(self, text: str) -> str:
+        try:
+            has_thinking = '<think>' in text or '</think>' in text
+            if has_thinking:
+                self.LOG.info("检测到思考内容标签，准备移除...")
+
+                if text.count('<think>') != text.count('</think>'):
+                    self.LOG.warning(
+                        f"检测到不匹配的思考标签: <think>数量={text.count('<think>')}, </think>数量={text.count('</think>')}"
+                    )
+
+                thinking_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
+                thinking_matches = thinking_pattern.findall(text)
+                if thinking_matches:
+                    for index, thinking in enumerate(thinking_matches, start=1):
+                        short_thinking = thinking[:100] + '...' if len(thinking) > 100 else thinking
+                        self.LOG.debug(f"思考内容 #{index}: {short_thinking}")
+
+                cleaned_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+                cleaned_text = re.sub(r'<think>.*?$', '', cleaned_text, flags=re.DOTALL)
+                cleaned_text = re.sub(r'^.*?</think>', '', cleaned_text, flags=re.DOTALL)
+                cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+                cleaned_text = cleaned_text.strip()
+
+                self.LOG.info(
+                    f"思考内容已移除，原文本长度: {len(text)} -> 清理后: {len(cleaned_text)}"
+                )
+
+                if not cleaned_text:
+                    return "回答内容为空，可能是模型仅返回了思考过程。请重新提问。"
+
+                return cleaned_text
+
+        except Exception as exc:
+            self.LOG.error(f"清理思考内容时出错: {exc}")
+
+        return text
+
+    def _remove_markdown_formatting(self, text: str) -> str:
+        try:
+            self.LOG.info("开始移除Markdown格式符号...")
+            original_length = len(text)
+
+            cleaned_text = re.sub(r'^\s*#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+            cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+            cleaned_text = cleaned_text.strip()
+
+            self.LOG.info(
+                f"Markdown格式符号已移除，原文本长度: {original_length} -> 清理后: {len(cleaned_text)}"
+            )
+
+            return cleaned_text
+
+        except Exception as exc:
+            self.LOG.error(f"移除Markdown格式符号时出错: {exc}")
+            return text
     
     def process_message(self, content, chat_id, sender, roomid, from_group, send_text_func):
         """处理可能包含Perplexity触发词的消息
