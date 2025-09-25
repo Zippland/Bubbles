@@ -6,6 +6,8 @@
 - 保持现有业务能力完整可用（天气、新闻、提醒、Perplexity 搜索、群管理等），迁移过程中不影响线上稳定性。
 - 兼容现有上下文对象 `MessageContext`，并保留与微信客户端交互所需的最小耦合。
 
+> 注：下述“现有架构”描述的是迁移前的遗留实现，目前 `commands/` 下的正则路由与 handlers 已移除，仅保留 `MessageContext`。
+
 ## 2. 现有架构梳理
 ### 2.1 指令流
 1. `robot.py` 中 `Robot.processMsg` 获取消息后构造 `MessageContext`，先交给 `CommandRouter.dispatch`（见 `commands/router.py:13`）。
@@ -138,7 +140,7 @@ WxMsg -> MessageContext -> FunctionCallRouter
 ### 阶段 P4：切换入口与清理遗留
 1. **替换 `Robot.processMsg` 流程**：
    - 将调用链切换为 `FunctionCallRouter.dispatch(ctx)`。
-   - 如果返回 `False` 且 `ctx.chat` 存在，则调用默认聊天模型兜底（原 `handle_chitchat`）。
+   - 如果返回 `False` 且 `ctx.chat` 存在，则调用默认聊天模型兜底（`run_chat_fallback`）。
 2. **移除旧模块**：
    - 删除 `commands/router.py`、`commands/models.py`、`commands/registry.py`、`commands/ai_router.py`、`commands/ai_functions.py`。
    - 将保留的业务 handler 根据需要移动到 `function_calls/handlers/` 或 `services/`。

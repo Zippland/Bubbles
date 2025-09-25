@@ -70,17 +70,16 @@ flowchart TD
 - 群聊场景会在 `at` 字段写入 `ctx.msg.sender`，确保回复时点名原始请求者。
 
 ### 6. 兜底逻辑（`robot.py:229-273`）
-- 当路由返回未处理状态时，机器人会回退到旧流程：自动通过好友请求、发送欢迎消息或调用 `handle_chitchat`。
+- 当路由返回未处理状态时，机器人会回退到旧流程：自动通过好友请求、发送欢迎消息或调用 `run_chat_fallback`。
 - 即使 Function Call 路由失败，整体对话体验依旧有保障。
 
 ## 优势
-- 对已知命令走直连路径，既避免额外的模型耗时，又能通过 JSON Schema 保证参数质量（`function_calls/router.py:103-175`）。
-- LLM 协调器清晰区分原生工具与提示词回退，后续替换模型时无需大改（`function_calls/llm.py:33-186`）。
+- 所有能力通过单一的 Function Call 路由注册与执行，避免了正则命令与 AI 决策两套体系并存的问题。
+- LLM 协调器完全依赖模型原生的函数调用能力，逻辑集中在 `_run_native_loop`（`function_calls/llm.py:57-134`）。
 - `FunctionResult` 既可直接回复，也能作为工具输出反馈给模型，减少重复实现（`function_calls/spec.py:12-36`）。
 
 ## 仍需关注的点
-- 进入 LLM 流程后，工具输出依赖模型二次组织文本；关键函数可考虑直接派发 `FunctionResult`，避免模型返回空字符串时用户无感知（`function_calls/llm.py:83-136`）。
-- 天气命令的直接路径默认关键词与城市之间存在空格；若要支持“天气北京”这类写法，需要放宽解析逻辑（`function_calls/router.py:148-156`）。
+- 进入 LLM 流程后，工具输出依赖模型二次组织文本；关键函数可考虑直接派发 `FunctionResult`，避免模型返回空字符串时用户无感知（`function_calls/llm.py:83-134`）。
 - 权限检查字段（`spec.auth`）仍是占位符，新增高权限工具前需补齐校验实现（`function_calls/router.py:35-38`）。
 
 ---

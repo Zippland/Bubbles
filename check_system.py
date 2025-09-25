@@ -21,11 +21,13 @@ def check_imports():
 
         # 检查处理器
         from function_calls.handlers import (
-            handle_weather, handle_news, handle_help,
-            handle_reminder_set, handle_reminder_list, handle_reminder_delete,
-            handle_perplexity_search, handle_summary, handle_clear_messages
+            handle_reminder_set,
+            handle_reminder_list,
+            handle_reminder_delete,
+            handle_perplexity_search,
+            handle_summary,
         )
-        print("✅ 所有处理器导入成功")
+        print("✅ 核心处理器导入成功")
 
         # 检查参数模型
         from function_calls.models import (
@@ -47,15 +49,14 @@ def check_function_registration():
         from function_calls.registry import list_functions
         functions = list_functions()
 
-        expected_count = 10
+        expected_count = 5
         if len(functions) != expected_count:
             print(f"⚠️ 函数数量异常: 期望{expected_count}个，实际{len(functions)}个")
             return False
 
         required_functions = [
-            'weather_query', 'news_query', 'help', 'summary',
             'reminder_set', 'reminder_list', 'reminder_delete',
-            'perplexity_search', 'clear_messages', 'insult'
+            'perplexity_search', 'summary'
         ]
 
         missing_functions = []
@@ -83,25 +84,7 @@ def check_router_initialization():
         router = FunctionCallRouter()
         print("✅ FunctionCallRouter初始化成功")
 
-        # 测试直接命令匹配
-        class MockCtx:
-            def __init__(self, text):
-                self.text = text
-
-        test_cases = [
-            ("help", "help"),
-            ("新闻", "news_query"),
-            ("天气 北京", "weather_query")
-        ]
-
-        for input_text, expected in test_cases:
-            ctx = MockCtx(input_text)
-            result = router._try_direct_command_match(ctx)
-            if result != expected:
-                print(f"❌ 直接匹配失败: '{input_text}' -> {result} (期望: {expected})")
-                return False
-
-        print("✅ 直接命令匹配正常")
+        print("✅ FunctionCallRouter 初始化成功")
         return True
 
     except Exception as e:

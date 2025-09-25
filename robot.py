@@ -25,13 +25,13 @@ from constants import ChatType
 from job_mgmt import Job
 from function.func_xml_process import XmlProcessor
 
-# 导入命令上下文与闲聊处理
+# 导入命令上下文
 from commands.context import MessageContext
-from commands.handlers import handle_chitchat  # 导入闲聊处理函数
 
 # 导入新的Function Call系统
 from function_calls.router import FunctionCallRouter
 import function_calls.init_handlers  # 导入以注册所有Function Call处理器
+from function_calls.services import run_chat_fallback
 
 __version__ = "39.2.4.0"
 
@@ -212,48 +212,28 @@ class Robot(Job):
                 self.LOG.info("消息已由Function Call路由器处理")
                 return
 
-            # 7. 如果没有命令处理器处理，则进行特殊逻辑处理
-            if not handled:
-                # 7.1 好友请求自动处理
-                if msg.type == 37:  # 好友请求
-                    self.autoAcceptFriendRequest(msg)
+            # 7. Function Call 未处理，则执行闲聊兜底或特殊逻辑
+            if msg.type == 37:  # 好友请求
+                self.autoAcceptFriendRequest(msg)
+                return
+
+            if msg.type == 10000:
+                if "加入了群聊" in msg.content and msg.from_group():
+                    new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
+                    if new_member_match:
+                        inviter = new_member_match.group(1)
+                        new_member = new_member_match.group(2)
+                        welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
+                        self.sendTextMsg(welcome_msg, msg.roomid)
+                        self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
                     return
-                    
-                # 7.2 系统消息处理
-                elif msg.type == 10000:
-                    # 7.2.1 处理新成员入群
-                    if "加入了群聊" in msg.content and msg.from_group():
-                        new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
-                        if new_member_match:
-                            inviter = new_member_match.group(1)  # 邀请人
-                            new_member = new_member_match.group(2)  # 新成员
-                            # 使用配置文件中的欢迎语，支持变量替换
-                            welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
-                            self.sendTextMsg(welcome_msg, msg.roomid)
-                            self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
-                        return
-                    # 7.2.2 处理新好友添加
-                    elif "你已添加了" in msg.content:
-                        self.sayHiToNewFriend(msg)
-                        return
-                
-                # 7.3 群聊消息，且配置了响应该群
-                if msg.from_group() and msg.roomid in self.config.GROUPS:
-                    # 如果在群里被@了，但命令路由器没有处理，则进行闲聊
-                    if msg.is_at(self.wxid):
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
-                    else:
-                        pass
-                        
-                # 7.4 私聊消息，未被命令处理，进行闲聊
-                elif not msg.from_group() and not msg.from_self():
-                    # 检查是否是文本消息(type 1)或者是包含用户输入的类型49消息
-                    if msg.type == 1 or (msg.type == 49 and ctx.text):
-                        self.LOG.info(f"准备回复私聊消息: 类型={msg.type}, 文本内容='{ctx.text}'")
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
-                    
+                if "你已添加了" in msg.content:
+                    self.sayHiToNewFriend(msg)
+                    return
+
+            if not run_chat_fallback(ctx):
+                self.LOG.warning("闲聊兜底失败或未发送回复")
+
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)
 

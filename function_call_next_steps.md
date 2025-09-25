@@ -2,9 +2,8 @@
 
 ## 1. 架构一致性如何提升？
 - **现状诊断**
-  - `function_calls/handlers.py:147` 等 handler 仍依赖 `commands/handlers.py` 中的正则/自然语言逻辑，导致新旧两套体系并存，增大耦合与维护成本。
-  - `function_calls/router.py:41` 的直接匹配逻辑与 LLM 选择逻辑混在一起，职责边界不清晰；而参数校验仅在 LLM 分支执行（`function_calls/router.py:150`）。
-  - 业务逻辑散落：例如新闻查询同时存在 `_get_news_info` 与命令 handler 版本，缺少统一 service 层。
+  - 业务逻辑已集中到 Function Call 体系，但闲聊兜底、服务层抽象仍需持续完善。
+  - router 与服务层的职责边界要保持清晰：router 负责模型交互与参数校验，业务细节放在 `function_calls/services/`。
 - **建议的架构骨架**
   1. **分层组织代码**：
      - `function_calls/spec.py`：仅保留数据结构。
@@ -47,7 +46,7 @@
 - **移除建议**：
   1. 删除 `self.command_router = CommandRouter(...)` 及相关 import；同时移除 `CommandRouter.dispatch` 调用与辅助日志。
   2. 移除 `ai_router` 回退逻辑和配置项 `FUNCTION_CALL_ROUTER.fallback_to_legacy`。确保配置文件同步更新（`config.yaml.template:151`）。
-  3. 将闲聊 fallback 改为：当 `FunctionCallRouter` 返回 `False` 时直接走 `handle_chitchat`，并记录原因日志。
+  3. 将闲聊 fallback 改为：当 `FunctionCallRouter` 返回 `False` 时直接走 `run_chat_fallback`，并记录原因日志。
   4. 清理不再使用的命令注册表与正则代码（`commands/registry.py`、`commands/router.py` 等），确认没有别的模块引用后可删。
   5. 回归测试：运行原有功能用例，确保删除旧路由不会影响提醒、天气等功能；同时观察日志，确认不再出现“命令路由器”相关输出。
 
