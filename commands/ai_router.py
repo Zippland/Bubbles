@@ -28,13 +28,13 @@ class AIRouter:
         装饰器：注册一个功能到AI路由器
         
         @ai_router.register(
-            name="weather_query",
-            description="查询指定城市的天气预报",
-            examples=["北京天气怎么样", "查一下上海的天气", "明天深圳会下雨吗"],
-            params_description="城市名称"
+            name="reminder_set",
+            description="设置提醒",
+            examples=["提醒我下午3点开会", "每天早上8点提醒我吃早饭"],
+            params_description="提醒时间和内容"
         )
-        def handle_weather(ctx: MessageContext, params: str) -> bool:
-            # 实现天气查询逻辑
+        def handle_reminder(ctx: MessageContext, params: str) -> bool:
+            # 实现提醒设置逻辑
             pass
         """
         def decorator(func: Callable) -> Callable:
@@ -88,8 +88,8 @@ class AIRouter:
         }
 
         #### 示例：
-        - 用户输入"北京天气怎么样" -> {"action_type": "function", "function_name": "weather_query", "params": "北京"}
-        - 用户输入"看看新闻" -> {"action_type": "function", "function_name": "news_query", "params": ""}
+        - 用户输入"提醒我下午3点开会" -> {"action_type": "function", "function_name": "reminder_set", "params": "下午3点开会"}
+        - 用户输入"查看我的提醒" -> {"action_type": "function", "function_name": "reminder_list", "params": ""}
         - 用户输入"你好" -> {"action_type": "chat"}
         - 用户输入"查一下Python教程" -> {"action_type": "function", "function_name": "perplexity_search", "params": "Python教程"}
 
