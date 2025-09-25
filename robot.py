@@ -231,8 +231,9 @@ class Robot(Job):
                     self.sayHiToNewFriend(msg)
                     return
 
-            if not run_chat_fallback(ctx):
-                self.LOG.warning("闲聊兜底失败或未发送回复")
+            if not (ctx.is_group and not ctx.is_at_bot):
+                if not run_chat_fallback(ctx):
+                    self.LOG.warning("闲聊兜底失败或未发送回复")
 
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)

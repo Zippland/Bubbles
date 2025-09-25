@@ -29,14 +29,23 @@ def run_perplexity(ctx: MessageContext, query: str) -> PerplexityResult:
     sender_wxid = ctx.msg.sender
     room_id = ctx.msg.roomid if ctx.is_group else None
 
+    captured_messages: list[str] = []
+
+    def capture_send_text(content: str, at_list: str = "") -> bool:
+        captured_messages.append(content)
+        return True
+
     was_handled, fallback_prompt = perplexity_instance.process_message(
         content=content_for_perplexity,
         chat_id=chat_id,
         sender=sender_wxid,
         roomid=room_id,
         from_group=ctx.is_group,
-        send_text_func=ctx.send_text
+        send_text_func=capture_send_text
     )
+
+    if captured_messages:
+        return PerplexityResult(success=True, messages=captured_messages, handled_externally=False)
 
     if was_handled:
         return PerplexityResult(success=True, messages=[], handled_externally=True)
