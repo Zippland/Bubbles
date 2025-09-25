@@ -2,8 +2,6 @@ import re
 from .models import Command
 from .handlers import (
     handle_help, 
-    # handle_duel, handle_sneak_attack, handle_duel_rank,
-    # handle_duel_stats, handle_check_equipment, handle_rename,
     handle_summary, handle_clear_messages, handle_news_request,
     handle_chitchat, handle_insult,
     handle_perplexity_ask, handle_reminder, handle_list_reminders, handle_delete_reminder,
