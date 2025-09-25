@@ -9,6 +9,7 @@ from threading import Thread
 import os
 import random
 import shutil
+import copy
 from image import AliyunImage, GeminiImage
 from image.img_manager import ImageGenerationManager
 
@@ -65,69 +66,130 @@ class Robot(Job):
         self.xml_processor = XmlProcessor(self.LOG)
 
         self.chat_models = {}
+        self.reasoning_chat_models = {}
         self.LOG.info("开始初始化各种AI模型...")
 
         # 初始化ChatGPT
         if ChatGPT.value_check(self.config.CHATGPT):
             try:
-                # 传入 message_summary 和 wxid
+                chatgpt_flash_conf = copy.deepcopy(self.config.CHATGPT)
+                flash_model_name = chatgpt_flash_conf.get("model_flash", "gpt-3.5-turbo")
+                chatgpt_flash_conf["model"] = flash_model_name
                 self.chat_models[ChatType.CHATGPT.value] = ChatGPT(
-                    self.config.CHATGPT,
+                    chatgpt_flash_conf,
                     message_summary_instance=self.message_summary,
                     bot_wxid=self.wxid
                 )
-                self.LOG.info(f"已加载 ChatGPT 模型")
+                self.LOG.info(f"已加载 ChatGPT 模型: {flash_model_name}")
+
+                reasoning_model_name = self.config.CHATGPT.get("model_reasoning")
+                if reasoning_model_name and reasoning_model_name != flash_model_name:
+                    chatgpt_reason_conf = copy.deepcopy(self.config.CHATGPT)
+                    chatgpt_reason_conf["model"] = reasoning_model_name
+                    self.reasoning_chat_models[ChatType.CHATGPT.value] = ChatGPT(
+                        chatgpt_reason_conf,
+                        message_summary_instance=self.message_summary,
+                        bot_wxid=self.wxid
+                    )
+                    self.LOG.info(f"已加载 ChatGPT 推理模型: {reasoning_model_name}")
             except Exception as e:
                 self.LOG.error(f"初始化 ChatGPT 模型时出错: {str(e)}")
             
         # 初始化DeepSeek
         if DeepSeek.value_check(self.config.DEEPSEEK):
             try:
-                 # 传入 message_summary 和 wxid
-                 self.chat_models[ChatType.DEEPSEEK.value] = DeepSeek(
-                     self.config.DEEPSEEK,
-                     message_summary_instance=self.message_summary,
-                     bot_wxid=self.wxid
-                 )
-                 self.LOG.info(f"已加载 DeepSeek 模型")
+                deepseek_flash_conf = copy.deepcopy(self.config.DEEPSEEK)
+                flash_model_name = deepseek_flash_conf.get("model_flash", "deepseek-chat")
+                deepseek_flash_conf["model"] = flash_model_name
+                self.chat_models[ChatType.DEEPSEEK.value] = DeepSeek(
+                    deepseek_flash_conf,
+                    message_summary_instance=self.message_summary,
+                    bot_wxid=self.wxid
+                )
+                self.LOG.info(f"已加载 DeepSeek 模型: {flash_model_name}")
+
+                reasoning_model_name = self.config.DEEPSEEK.get("model_reasoning")
+                if not reasoning_model_name and flash_model_name != "deepseek-reasoner":
+                    reasoning_model_name = "deepseek-reasoner"
+
+                if reasoning_model_name and reasoning_model_name != flash_model_name:
+                    deepseek_reason_conf = copy.deepcopy(self.config.DEEPSEEK)
+                    deepseek_reason_conf["model"] = reasoning_model_name
+                    self.reasoning_chat_models[ChatType.DEEPSEEK.value] = DeepSeek(
+                        deepseek_reason_conf,
+                        message_summary_instance=self.message_summary,
+                        bot_wxid=self.wxid
+                    )
+                    self.LOG.info(f"已加载 DeepSeek 推理模型: {reasoning_model_name}")
             except Exception as e:
-                 self.LOG.error(f"初始化 DeepSeek 模型时出错: {str(e)}")
+                self.LOG.error(f"初始化 DeepSeek 模型时出错: {str(e)}")
         
         # 初始化Gemini
         if Gemini.value_check(self.config.GEMINI):
             try:
-                # 传入 message_summary 和 wxid
+                gemini_flash_conf = copy.deepcopy(self.config.GEMINI)
+                flash_model_name = gemini_flash_conf.get("model_flash", Gemini.DEFAULT_MODEL)
+                gemini_flash_conf["model_name"] = flash_model_name
                 self.chat_models[ChatType.GEMINI.value] = Gemini(
-                    self.config.GEMINI,
+                    gemini_flash_conf,
                     message_summary_instance=self.message_summary,
                     bot_wxid=self.wxid
                 )
-                self.LOG.info(f"已加载 Gemini 模型")
+                self.LOG.info(f"已加载 Gemini 模型: {flash_model_name}")
+
+                reasoning_model_name = self.config.GEMINI.get("model_reasoning")
+                if reasoning_model_name and reasoning_model_name != flash_model_name:
+                    gemini_reason_conf = copy.deepcopy(self.config.GEMINI)
+                    gemini_reason_conf["model_name"] = reasoning_model_name
+                    self.reasoning_chat_models[ChatType.GEMINI.value] = Gemini(
+                        gemini_reason_conf,
+                        message_summary_instance=self.message_summary,
+                        bot_wxid=self.wxid
+                    )
+                    self.LOG.info(f"已加载 Gemini 推理模型: {reasoning_model_name}")
             except Exception as e:
                 self.LOG.error(f"初始化 Gemini 模型时出错: {str(e)}")
             
         # 初始化Perplexity
         if Perplexity.value_check(self.config.PERPLEXITY):
-            self.chat_models[ChatType.PERPLEXITY.value] = Perplexity(self.config.PERPLEXITY)
-            self.perplexity = self.chat_models[ChatType.PERPLEXITY.value]  # 单独保存一个引用用于特殊处理
-            self.LOG.info(f"已加载 Perplexity 模型")
+            try:
+                perplexity_flash_conf = copy.deepcopy(self.config.PERPLEXITY)
+                flash_model_name = perplexity_flash_conf.get("model_flash", "sonar")
+                perplexity_flash_conf["model"] = flash_model_name
+                self.chat_models[ChatType.PERPLEXITY.value] = Perplexity(perplexity_flash_conf)
+                self.perplexity = self.chat_models[ChatType.PERPLEXITY.value]  # 单独保存一个引用用于特殊处理
+                self.LOG.info(f"已加载 Perplexity 模型: {flash_model_name}")
+
+                reasoning_model_name = self.config.PERPLEXITY.get("model_reasoning")
+                if reasoning_model_name and reasoning_model_name != flash_model_name:
+                    perplexity_reason_conf = copy.deepcopy(self.config.PERPLEXITY)
+                    perplexity_reason_conf["model"] = reasoning_model_name
+                    self.reasoning_chat_models[ChatType.PERPLEXITY.value] = Perplexity(perplexity_reason_conf)
+                    self.LOG.info(f"已加载 Perplexity 推理模型: {reasoning_model_name}")
+            except Exception as e:
+                self.LOG.error(f"初始化 Perplexity 模型时出错: {str(e)}")
             
         # 根据chat_type参数选择默认模型
+        self.current_model_id = None
         if chat_type > 0 and chat_type in self.chat_models:
             self.chat = self.chat_models[chat_type]
             self.default_model_id = chat_type
+            self.current_model_id = chat_type
         else:
             # 如果没有指定chat_type或指定的模型不可用，尝试使用配置文件中指定的默认模型
             self.default_model_id = self.config.GROUP_MODELS.get('default', 0)
             if self.default_model_id in self.chat_models:
                 self.chat = self.chat_models[self.default_model_id]
+                self.current_model_id = self.default_model_id
             elif self.chat_models:  # 如果有任何可用模型，使用第一个
                 self.default_model_id = list(self.chat_models.keys())[0]
                 self.chat = self.chat_models[self.default_model_id]
+                self.current_model_id = self.default_model_id
             else:
                 self.LOG.warning("未配置任何可用的模型")
                 self.chat = None
                 self.default_model_id = 0
+                self.current_model_id = None
 
         self.LOG.info(f"默认模型: {self.chat}，模型ID: {self.default_model_id}")
         
@@ -201,6 +263,30 @@ class Robot(Job):
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
             
+            reasoning_triggered = bool(ctx.text and "想想" in ctx.text)
+            if reasoning_triggered:
+                self.LOG.info("检测到推理模式触发词，跳过AI路由。")
+                ctx.send_text("正在深度思考，请稍候...")
+
+                previous_ctx_chat = ctx.chat
+                reasoning_chat = self._get_reasoning_chat_model()
+                if reasoning_chat:
+                    ctx.chat = reasoning_chat
+                    self.LOG.debug(f"使用推理模型 {reasoning_chat} 处理消息")
+                else:
+                    self.LOG.warning("当前模型未配置推理模型，使用默认模型处理深度思考请求")
+
+                reasoning_handled = False
+                try:
+                    reasoning_handled = handle_chitchat(ctx, None)
+                finally:
+                    ctx.chat = previous_ctx_chat
+
+                if not reasoning_handled:
+                    self.LOG.warning("推理模式处理消息失败，向用户返回降级提示")
+                    ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
+                return
+
             handled = False
 
             # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）
@@ -448,6 +534,13 @@ class Robot(Job):
             
         return None
     
+    def _get_reasoning_chat_model(self):
+        """获取当前聊天模型对应的推理模型实例"""
+        model_id = getattr(self, 'current_model_id', None)
+        if model_id is None:
+            return None
+        return self.reasoning_chat_models.get(model_id)
+
 
     def _select_model_for_message(self, msg: WxMsg) -> None:
         """根据消息来源选择对应的AI模型
@@ -464,6 +557,7 @@ class Robot(Job):
             # 没有配置，使用默认模型
             if self.default_model_id in self.chat_models:
                 self.chat = self.chat_models[self.default_model_id]
+                self.current_model_id = self.default_model_id
             return
             
         # 群聊消息处理
@@ -477,10 +571,12 @@ class Robot(Job):
                         if self.chat != self.chat_models[model_id]:
                             self.chat = self.chat_models[model_id]
                             self.LOG.info(f"已为群 {source_id} 切换到模型: {self.chat.__class__.__name__}")
+                        self.current_model_id = model_id
                     else:
                         self.LOG.warning(f"群 {source_id} 配置的模型ID {model_id} 不可用，使用默认模型")
                         if self.default_model_id in self.chat_models:
                             self.chat = self.chat_models[self.default_model_id]
+                            self.current_model_id = self.default_model_id
                     return
         # 私聊消息处理
         else:
@@ -493,15 +589,18 @@ class Robot(Job):
                         if self.chat != self.chat_models[model_id]:
                             self.chat = self.chat_models[model_id]
                             self.LOG.info(f"已为私聊用户 {source_id} 切换到模型: {self.chat.__class__.__name__}")
+                        self.current_model_id = model_id
                     else:
                         self.LOG.warning(f"私聊用户 {source_id} 配置的模型ID {model_id} 不可用，使用默认模型")
                         if self.default_model_id in self.chat_models:
                             self.chat = self.chat_models[self.default_model_id]
+                            self.current_model_id = self.default_model_id
                     return
         
         # 如果没有找到对应配置，使用默认模型
         if self.default_model_id in self.chat_models:
             self.chat = self.chat_models[self.default_model_id]
+            self.current_model_id = self.default_model_id
             
     def _get_specific_history_limit(self, msg: WxMsg) -> int:
         """根据消息来源和配置，获取特定的历史消息数量限制
