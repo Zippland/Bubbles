@@ -71,8 +71,8 @@ def ai_handle_reminder_delete(ctx: MessageContext, params: str) -> bool:
 # ======== Perplexity搜索功能 ========
 @ai_router.register(
     name="perplexity_search",
-    description="搜索查询资料并深度研究某个专业问题",
-    examples=["搜索Python最新特性", "查查机器学习教程"],
+    description="在网络上搜索任何问题",
+    examples=["搜索Python最新特性", "查查机器学习教程","深圳天气怎么样"],
     params_description="搜索内容"
 )
 def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
