@@ -88,7 +88,9 @@ class FunctionCallLLM:
             "When you invoke a function, wait for the tool response before replying to the user. "
             "Only deliver a final answer once you have enough information."
         )
-        messages.append({"role": "system", "content": tool_prompt})
+        history_messages = self._build_history_messages(ctx)
+        if history_messages:
+            messages.extend(history_messages)
 
         messages.append({"role": "user", "content": ctx.text})
 
@@ -207,3 +209,37 @@ class FunctionCallLLM:
         except Exception as exc:
             self.logger.error(f"参数验证失败: {exc}")
             return False
+
+    def _build_history_messages(self, ctx: MessageContext) -> List[Dict[str, Any]]:
+        message_summary = getattr(ctx.robot, "message_summary", None)
+        if not message_summary:
+            return []
+
+        try:
+            history = message_summary.get_messages(ctx.get_receiver())
+        except Exception as exc:  # pragma: no cover - 防御
+            if ctx.logger:
+                ctx.logger.error(f"加载历史消息失败: {exc}")
+            return []
+
+        limit = getattr(ctx, "specific_max_history", None)
+        if limit is None:
+            limit = getattr(ctx.chat, "max_history_messages", None)
+
+        if limit is not None and limit > 0:
+            history = history[-limit:]
+        elif limit == 0:
+            history = []
+
+        formatted: List[Dict[str, Any]] = []
+        for item in history:
+            content = item.get("content")
+            if not content:
+                continue
+            role = "assistant" if item.get("sender_wxid") == ctx.robot_wxid else "user"
+            if role == "user":
+                sender_name = item.get("sender", "未知用户")
+                content = f"{sender_name}: {content}"
+            formatted.append({"role": role, "content": content})
+
+        return formatted
