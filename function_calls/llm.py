@@ -81,13 +81,23 @@ class FunctionCallLLM:
         elif isinstance(system_msg, str):
             custom_prompt = system_msg
         if custom_prompt:
-            messages.append({"role": "system", "content": custom_prompt})
+            from datetime import datetime
+
+            now = datetime.now()
+            suffix = now.strftime("%Y-%m-%d %H:%M:%S %A")
+            enriched_prompt = (
+                f"{custom_prompt}\n\n"
+                f"当前时间：{suffix}\n"
+            )
+            messages.append({"role": "system", "content": enriched_prompt})
 
         tool_prompt = (
             "You are an assistant that can call tools. "
             "When you invoke a function, wait for the tool response before replying to the user. "
             "Only deliver a final answer once you have enough information."
         )
+        messages.append({"role": "system", "content": tool_prompt})
+
         history_messages = self._build_history_messages(ctx)
         if history_messages:
             messages.extend(history_messages)
@@ -131,6 +141,11 @@ class FunctionCallLLM:
                         spec = functions[function_name]
                         result = executor(spec, arguments)
                         tool_content = formatter(result)
+                        self.logger.info(
+                            "Function '%s' tool response payload: %s",
+                            function_name,
+                            tool_content,
+                        )
                     messages.append(
                         {
                             "role": "tool",
@@ -237,9 +252,8 @@ class FunctionCallLLM:
             if not content:
                 continue
             role = "assistant" if item.get("sender_wxid") == ctx.robot_wxid else "user"
-            if role == "user":
-                sender_name = item.get("sender", "未知用户")
-                content = f"{sender_name}: {content}"
+            sender_name = item.get("sender", "未知用户")
+            content = f"[{sender_name}] {content}"
             formatted.append({"role": role, "content": content})
 
         return formatted

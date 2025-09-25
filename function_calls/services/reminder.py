@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from function.func_reminder import ReminderManager
@@ -39,9 +40,15 @@ def create_reminder(
     data: Dict[str, Any],
     roomid: Optional[str]
 ) -> ReminderServiceResult:
+    time_value = data["time"]
+    if data.get("type") == "once":
+        normalized_time = _normalize_once_time(time_value)
+    else:
+        normalized_time = time_value
+
     payload = {
         "type": data["type"],
-        "time": data["time"],
+        "time": normalized_time,
         "content": data["content"],
     }
     if data.get("weekday") is not None:
@@ -62,6 +69,38 @@ def create_reminder(
         content=payload["content"],
     )
     return ReminderServiceResult(success=True, messages=[message])
+
+
+def _normalize_once_time(time_str: str) -> str:
+    raw = (time_str or "").strip()
+    if not raw:
+        return time_str
+
+    parsed: Optional[datetime] = None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            break
+        except ValueError:
+            continue
+
+    if parsed is None:
+        return time_str
+
+    now = datetime.now()
+    if parsed.year < now.year:
+        try:
+            candidate = parsed.replace(year=now.year)
+        except ValueError:
+            candidate = parsed
+        if candidate <= now:
+            try:
+                candidate = candidate.replace(year=candidate.year + 1)
+            except ValueError:
+                candidate = parsed
+        parsed = candidate
+
+    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def list_reminders(
