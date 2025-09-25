@@ -1,7 +1,7 @@
 """Function Call 路由器"""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from commands.context import MessageContext
 
@@ -39,45 +39,6 @@ class FunctionCallRouter:
 
         return True
 
-    def _try_direct_command_match(self, ctx: MessageContext) -> Optional[str]:
-        """
-        尝试直接命令匹配，避免不必要的LLM调用
-
-        返回匹配的函数名，如果没有匹配则返回None
-        """
-        text = ctx.text.strip().lower()
-
-        # 定义一些明确的命令关键字映射
-        direct_commands = {
-            "help": "help",
-            "帮助": "help",
-            "指令": "help",
-            "新闻": "news_query",
-            "summary": "summary",
-            "总结": "summary",
-            "clearmessages": "clear_messages",
-            "清除历史": "clear_messages"
-        }
-
-        # 检查完全匹配
-        if text in direct_commands:
-            return direct_commands[text]
-
-        # 检查以特定前缀开头的命令
-        if text.startswith("ask ") and len(text) > 4:
-            return "perplexity_search"
-
-        if text.startswith("天气") or text.startswith("天气预报"):
-            return "weather_query"
-
-        if text in ["查看提醒", "我的提醒", "提醒列表"]:
-            return "reminder_list"
-
-        if text.startswith("骂一下"):
-            return "insult"
-
-        return None
-
     def dispatch(self, ctx: MessageContext) -> bool:
         """
         分发消息到函数处理器
@@ -100,26 +61,7 @@ class FunctionCallRouter:
                 self.logger.warning("没有注册任何函数")
                 return False
 
-            # 第一步：尝试直接命令匹配
-            direct_function = self._try_direct_command_match(ctx)
-            if direct_function and direct_function in functions:
-                spec = functions[direct_function]
-
-                if not self._check_scope_and_permissions(ctx, spec):
-                    return False
-
-                arguments = self._extract_arguments_for_direct_command(ctx, direct_function)
-                if not self.llm.validate_arguments(arguments, spec.parameters_schema):
-                    self.logger.warning(f"直接命令 {direct_function} 参数验证失败")
-                    return False
-
-                result = self._invoke_function(ctx, spec, arguments)
-                if result.handled:
-                    result.dispatch(ctx)
-                    return True
-                # 如果没有处理成功，继续尝试LLM流程
-
-            # 第二步：使用LLM执行多轮函数调用
+            # 使用 LLM 执行函数调用流程
             llm_result = self.llm.run(
                 ctx,
                 functions,
@@ -140,38 +82,6 @@ class FunctionCallRouter:
         except Exception as e:
             self.logger.error(f"FunctionCallRouter dispatch 异常: {e}")
             return False
-
-    def _extract_arguments_for_direct_command(self, ctx: MessageContext, function_name: str) -> Dict[str, Any]:
-        """为直接命令提取参数"""
-        text = ctx.text.strip()
-
-        if function_name == "weather_query":
-            # 提取城市名
-            if text.startswith("天气预报 "):
-                city = text[4:].strip()
-            elif text.startswith("天气 "):
-                city = text[3:].strip()
-            else:
-                city = ""
-            return {"city": city}
-
-        elif function_name == "perplexity_search":
-            # 提取搜索查询
-            if text.startswith("ask "):
-                query = text[4:].strip()
-            else:
-                query = text
-            return {"query": query}
-
-        elif function_name == "insult":
-            # 提取要骂的用户
-            import re
-            match = re.search(r"骂一下\s*@([^\s@]+)", text)
-            target_user = match.group(1) if match else ""
-            return {"target_user": target_user}
-
-        # 对于不需要参数的函数，返回空字典
-        return {}
 
     def _invoke_function(self, ctx: MessageContext, spec: FunctionSpec, arguments: Dict[str, Any]) -> FunctionResult:
         """调用函数处理器，返回结构化结果"""

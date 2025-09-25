@@ -67,7 +67,6 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
 - 支持为不同的群聊和私聊设置不同的 AI 模型和 system prompt
   - OpenAI (ChatGPT)
   - DeepSeek
-  - Gemini
 
 #### 🛠️ 双重路由系统
 - **命令路由系统**：基于正则表达式的精确匹配，高效处理特定命令

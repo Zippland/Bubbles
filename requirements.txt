@@ -13,6 +13,4 @@ pillow
 jupyter_client
 zhdate
 ipykernel
-google-generativeai>=0.3.0
 dashscope
-google-genai

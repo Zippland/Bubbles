@@ -3,6 +3,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+from copy import deepcopy
 from datetime import datetime
 import time # 引入 time 模块
 
@@ -24,6 +25,10 @@ class DeepSeek():
         self.model = conf.get("model", "deepseek-chat")
         # 读取最大历史消息数配置 
         self.max_history_messages = conf.get("max_history_messages", 10) # 读取配置，默认10条
+        self.strict_functions = bool(conf.get("function_call_strict", False))
+        if self.strict_functions and conf.get("api") is None:
+            # 严格模式需要 beta 端点
+            api = "https://api.deepseek.com/beta"
         self.LOG = logging.getLogger("DeepSeek")
 
         # 存储传入的实例和wxid 
@@ -118,6 +123,42 @@ class DeepSeek():
         except Exception as e0:
             self.LOG.error(f"发生未知错误：{str(e0)}")
             return "抱歉，处理您的请求时出现了错误"
+
+    def call_with_functions(self, messages, functions, wxid):
+        """Invoke DeepSeek function-calling API."""
+        try:
+            tools = []
+            for fn in functions:
+                payload = deepcopy(fn)
+                tool_entry = {
+                    "type": "function",
+                    "function": {
+                        "name": payload.get("name"),
+                        "description": payload.get("description", ""),
+                        "parameters": payload.get("parameters", {}),
+                    },
+                }
+                if self.strict_functions:
+                    tool_entry["function"]["strict"] = True
+                tools.append(tool_entry)
+
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "stream": False,
+            }
+
+            response = self.client.chat.completions.create(**params)
+            return response
+
+        except (APIConnectionError, APIError, AuthenticationError) as exc:
+            self.LOG.error(f"DeepSeek 函数调用失败: {exc}")
+            raise
+        except Exception as exc:  # pragma: no cover - 兜底保护
+            self.LOG.error(f"调用 DeepSeek 函数接口时发生未知错误: {exc}", exc_info=True)
+            raise
 
 
 if __name__ == "__main__":

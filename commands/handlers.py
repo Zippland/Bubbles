@@ -4,8 +4,6 @@ from typing import Optional, Match, Dict, Any
 import json # 确保已导入json
 from datetime import datetime # 确保已导入datetime
 import os # 导入os模块用于文件路径操作
-# from function.func_duel import DuelRankSystem 
-
 # 前向引用避免循环导入
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -25,14 +23,6 @@ def handle_help(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         "- 天气预报/预报 [城市名]",
         "- 新闻",
         "- ask [问题]",
-        "",
-        "【决斗 & 偷袭】",
-        "- 决斗@XX",
-        "- 偷袭@XX",
-        "- 决斗排行/排行榜",
-        "- 我的战绩/决斗战绩",
-        "- 我的装备/查看装备",
-        "- 改名 [旧名] [新名]",
         "",
         "【提醒】",
         "- 提醒xxxxx：一次性、每日、每周",

@@ -1,63 +1,24 @@
 """Function Call handlers built on top of structured services."""
 from __future__ import annotations
 
-import logging
 from commands.context import MessageContext
 
 from .models import (
-    WeatherArgs,
-    NewsArgs,
     ReminderArgs,
     ReminderListArgs,
     ReminderDeleteArgs,
     PerplexityArgs,
-    HelpArgs,
     SummaryArgs,
-    ClearMessagesArgs,
-    InsultArgs,
 )
 from .registry import tool_function
 from .spec import FunctionResult
 from .services import (
-    build_help_text,
-    build_insult,
-    clear_group_messages,
     create_reminder,
     delete_reminder,
-    get_news_digest,
-    get_weather_report,
     list_reminders,
     run_perplexity,
     summarize_messages,
 )
-
-logger = logging.getLogger(__name__)
-
-
-@tool_function(
-    name="weather_query",
-    description="查询城市天气预报",
-    examples=["北京天气怎么样", "上海天气", "深圳明天会下雨吗"],
-    scope="both",
-    require_at=True,
-)
-def handle_weather(ctx: MessageContext, args: WeatherArgs) -> FunctionResult:
-    result = get_weather_report(args.city)
-    at = ctx.msg.sender if ctx.is_group else ""
-    return FunctionResult(handled=True, messages=[result.message], at=at if at else "")
-
-
-@tool_function(
-    name="news_query",
-    description="获取今日新闻",
-    examples=["看看今天的新闻", "今日要闻", "新闻"],
-    scope="both",
-    require_at=True,
-)
-def handle_news(ctx: MessageContext, args: NewsArgs) -> FunctionResult:
-    result = get_news_digest()
-    at = ctx.msg.sender if ctx.is_group else ""
-    return FunctionResult(handled=True, messages=[result.message], at=at if at else "")
 
 
 @tool_function(
@@ -68,7 +29,7 @@ def handle_news(ctx: MessageContext, args: NewsArgs) -> FunctionResult:
     require_at=True,
 )
 def handle_reminder_set(ctx: MessageContext, args: ReminderArgs) -> FunctionResult:
-    manager = getattr(ctx.robot, 'reminder_manager', None)
+    manager = getattr(ctx.robot, "reminder_manager", None)
     at = ctx.msg.sender if ctx.is_group else ""
     if not manager:
         return FunctionResult(handled=True, messages=["❌ 内部错误：提醒管理器未初始化。"], at=at)
@@ -90,7 +51,7 @@ def handle_reminder_set(ctx: MessageContext, args: ReminderArgs) -> FunctionResu
     require_at=True,
 )
 def handle_reminder_list(ctx: MessageContext, args: ReminderListArgs) -> FunctionResult:
-    manager = getattr(ctx.robot, 'reminder_manager', None)
+    manager = getattr(ctx.robot, "reminder_manager", None)
     at = ctx.msg.sender if ctx.is_group else ""
     if not manager:
         return FunctionResult(handled=True, messages=["❌ 内部错误：提醒管理器未初始化。"], at=at)
@@ -107,7 +68,7 @@ def handle_reminder_list(ctx: MessageContext, args: ReminderListArgs) -> Functio
     require_at=True,
 )
 def handle_reminder_delete(ctx: MessageContext, args: ReminderDeleteArgs) -> FunctionResult:
-    manager = getattr(ctx.robot, 'reminder_manager', None)
+    manager = getattr(ctx.robot, "reminder_manager", None)
     at = ctx.msg.sender if ctx.is_group else ""
     if not manager:
         return FunctionResult(handled=True, messages=["❌ 内部错误：提醒管理器未初始化。"], at=at)
@@ -133,18 +94,6 @@ def handle_perplexity_search(ctx: MessageContext, args: PerplexityArgs) -> Funct
 
 
 @tool_function(
-    name="help",
-    description="显示机器人帮助信息",
-    examples=["help", "帮助", "指令"],
-    scope="both",
-    require_at=False,
-)
-def handle_help(ctx: MessageContext, args: HelpArgs) -> FunctionResult:
-    help_text = build_help_text()
-    return FunctionResult(handled=True, messages=[help_text])
-
-
-@tool_function(
     name="summary",
     description="总结群聊最近的消息",
     examples=["summary", "总结"],
@@ -153,28 +102,4 @@ def handle_help(ctx: MessageContext, args: HelpArgs) -> FunctionResult:
 )
 def handle_summary(ctx: MessageContext, args: SummaryArgs) -> FunctionResult:
     result = summarize_messages(ctx)
-    return FunctionResult(handled=True, messages=[result.message])
-
-
-@tool_function(
-    name="clear_messages",
-    description="清除群聊历史消息记录",
-    examples=["clearmessages", "清除历史"],
-    scope="group",
-    require_at=True,
-)
-def handle_clear_messages(ctx: MessageContext, args: ClearMessagesArgs) -> FunctionResult:
-    result = clear_group_messages(ctx)
-    return FunctionResult(handled=True, messages=[result.message])
-
-
-@tool_function(
-    name="insult",
-    description="骂指定用户（仅限群聊）",
-    examples=["骂一下@某人"],
-    scope="group",
-    require_at=True,
-)
-def handle_insult(ctx: MessageContext, args: InsultArgs) -> FunctionResult:
-    result = build_insult(ctx, args.target_user)
     return FunctionResult(handled=True, messages=[result.message])

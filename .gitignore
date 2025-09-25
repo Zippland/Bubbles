@@ -10,5 +10,4 @@ logs/
 *.log.*
 
 config.yaml
-duel_ranks.json
 data/

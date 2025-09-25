@@ -9,18 +9,15 @@ from threading import Thread
 import os
 import random
 import shutil
-from image import AliyunImage, GeminiImage
 from image.img_manager import ImageGenerationManager
 
 from wcferry import Wcf, WxMsg
 
 from ai_providers.ai_chatgpt import ChatGPT
 from ai_providers.ai_deepseek import DeepSeek
-from ai_providers.ai_gemini import Gemini
 from ai_providers.ai_perplexity import Perplexity
 from function.func_weather import Weather
 from function.func_news import News
-from function.func_duel import start_duel, get_rank_list, get_player_stats, change_player_name, DuelManager, attempt_sneak_attack
 from function.func_summary import MessageSummary  # 导入新的MessageSummary类
 from function.func_reminder import ReminderManager  # 导入ReminderManager类
 from configuration import Config
@@ -52,8 +49,6 @@ class Robot(Job):
         self.wxid = self.wcf.get_self_wxid() # 获取机器人自己的wxid
         self.allContacts = self.getAllContacts()
         self._msg_timestamps = []
-        self.duel_manager = DuelManager(self.sendDuelMsg)
-
         try:
              db_path = "data/message_history.db"
              # 使用 getattr 安全地获取 MAX_HISTORY，如果不存在则默认为 300
@@ -95,19 +90,6 @@ class Robot(Job):
             except Exception as e:
                  self.LOG.error(f"初始化 DeepSeek 模型时出错: {str(e)}")
         
-        # 初始化Gemini
-        if Gemini.value_check(self.config.GEMINI):
-            try:
-                # 传入 message_summary 和 wxid
-                self.chat_models[ChatType.GEMINI.value] = Gemini(
-                    self.config.GEMINI,
-                    message_summary_instance=self.message_summary,
-                    bot_wxid=self.wxid
-                )
-                self.LOG.info(f"已加载 Gemini 模型")
-            except Exception as e:
-                self.LOG.error(f"初始化 Gemini 模型时出错: {str(e)}")
-            
         # 初始化Perplexity
         if Perplexity.value_check(self.config.PERPLEXITY):
             self.chat_models[ChatType.PERPLEXITY.value] = Perplexity(self.config.PERPLEXITY)
@@ -417,36 +399,12 @@ class Robot(Job):
         for r in receivers:
             self.sendTextMsg(report, r)
 
-    def sendDuelMsg(self, msg: str, receiver: str) -> None:
-        """发送决斗消息，不受消息频率限制，不记入历史记录
-        :param msg: 消息字符串
-        :param receiver: 接收人wxid或者群id
-        """
-        try:
-            self.wcf.send_text(f"{msg}", receiver, "")
-        except Exception as e:
-            self.LOG.error(f"发送决斗消息失败: {e}")
-
     def cleanup_perplexity_threads(self):
         """清理所有Perplexity线程"""
         # 如果已初始化Perplexity实例，调用其清理方法
         perplexity_instance = self.get_perplexity_instance()
         if perplexity_instance:
             perplexity_instance.cleanup()
-        
-        # 检查并等待决斗线程结束
-        if hasattr(self, 'duel_manager') and self.duel_manager.is_duel_running():
-            self.LOG.info("等待决斗线程结束...")
-            # 最多等待5秒
-            for i in range(5):
-                if not self.duel_manager.is_duel_running():
-                    break
-                time.sleep(1)
-                
-            if self.duel_manager.is_duel_running():
-                self.LOG.warning("决斗线程在退出时仍在运行")
-            else:
-                self.LOG.info("决斗线程已结束")
                 
     def cleanup(self):
         """清理所有资源，在程序退出前调用"""
