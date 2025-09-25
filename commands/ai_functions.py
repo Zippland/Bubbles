@@ -72,36 +72,65 @@ def ai_handle_reminder_delete(ctx: MessageContext, params: str) -> bool:
 @ai_router.register(
     name="perplexity_search",
     description="在网络上搜索任何问题",
-    examples=["搜索Python最新特性", "查查机器学习教程","深圳天气怎么样"],
-    params_description="搜索内容"
+    examples=[
+        "搜索Python最新特性",
+        "查查机器学习教程",
+        '{"query":"量子计算发展", "deep_research": false}'
+    ],
+    params_description="可直接填写搜索内容；若问题极其复杂且需要长时间深度研究，能接收花费大量时间和费用，请传 JSON，如 {\"query\":\"主题\", \"deep_research\": true}\n只有当问题确实十分复杂、需要长时间联网深度研究时，才在 params 中加入 JSON 字段 \"deep_research\": true；否则保持默认以节省时间和费用。"
 )
 def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
     """AI路由的Perplexity搜索处理"""
-    if not params.strip():
+    import json
+
+    params = params.strip()
+
+    if not params:
         at_list = ctx.msg.sender if ctx.is_group else ""
         ctx.send_text("请告诉我你想搜索什么内容", at_list)
         return True
-    
+
+    deep_research = False
+    query = params
+    if params.startswith("{"):
+        try:
+            parsed = json.loads(params)
+            if isinstance(parsed, dict):
+                query = parsed.get("query") or parsed.get("q") or ""
+                mode = parsed.get("mode") or parsed.get("research_mode")
+                deep_research = bool(parsed.get("deep_research") or parsed.get("full_research") or (isinstance(mode, str) and mode.lower() in {"deep", "full", "research"}))
+        except json.JSONDecodeError:
+            query = params
+
+    if not isinstance(query, str):
+        query = str(query or "")
+    query = query.strip()
+    if not query:
+        at_list = ctx.msg.sender if ctx.is_group else ""
+        ctx.send_text("请告诉我你想搜索什么内容", at_list)
+        return True
+
     # 获取Perplexity实例
     perplexity_instance = getattr(ctx.robot, 'perplexity', None)
     if not perplexity_instance:
         ctx.send_text("❌ Perplexity搜索功能当前不可用")
         return True
-    
+
     # 调用Perplexity处理
-    content_for_perplexity = f"ask {params}"
+    content_for_perplexity = f"ask {query}"
     chat_id = ctx.get_receiver()
     sender_wxid = ctx.msg.sender
     room_id = ctx.msg.roomid if ctx.is_group else None
     is_group = ctx.is_group
-    
+
     was_handled, fallback_prompt = perplexity_instance.process_message(
         content=content_for_perplexity,
         chat_id=chat_id,
         sender=sender_wxid,
         roomid=room_id,
         from_group=is_group,
-        send_text_func=ctx.send_text
+        send_text_func=ctx.send_text,
+        enable_full_research=deep_research
     )
     
     # 如果Perplexity无法处理，使用默认AI

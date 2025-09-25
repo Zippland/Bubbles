@@ -14,7 +14,17 @@ from openai import OpenAI
 class PerplexityThread(Thread):
     """处理Perplexity请求的线程"""
     
-    def __init__(self, perplexity_instance, prompt, chat_id, send_text_func, receiver, at_user=None, on_finish: Optional[Callable[[], None]] = None):
+    def __init__(
+        self,
+        perplexity_instance,
+        prompt,
+        chat_id,
+        send_text_func,
+        receiver,
+        at_user=None,
+        on_finish: Optional[Callable[[], None]] = None,
+        enable_full_research: bool = False,
+    ):
         """初始化Perplexity处理线程
         
         Args:
@@ -34,13 +44,12 @@ class PerplexityThread(Thread):
         self.at_user = at_user
         self.LOG = logging.getLogger("PerplexityThread")
         self.on_finish = on_finish
+        self.enable_full_research = enable_full_research
         
         # 检查是否使用reasoning模型
-        self.is_reasoning_model = False
-        if hasattr(self.perplexity, 'config'):
-            model_name = self.perplexity.config.get('model', 'sonar').lower()
-            self.is_reasoning_model = 'reasoning' in model_name
-            self.LOG.info(f"Perplexity使用模型: {model_name}, 是否为reasoning模型: {self.is_reasoning_model}")
+        self.is_reasoning_model = bool(self.enable_full_research and getattr(self.perplexity, 'has_reasoning_model', False))
+        if self.is_reasoning_model:
+            self.LOG.info("Perplexity将启用推理模型处理此次请求")
         
     def run(self):
         """线程执行函数"""
@@ -48,7 +57,11 @@ class PerplexityThread(Thread):
             self.LOG.info(f"开始处理Perplexity请求: {self.prompt[:30]}...")
             
             # 获取回答
-            response = self.perplexity.get_answer(self.prompt, self.chat_id)
+            response = self.perplexity.get_answer(
+                self.prompt,
+                self.chat_id,
+                deep_research=self.enable_full_research
+            )
             
             # 处理sonar-reasoning和sonar-reasoning-pro模型的<think>标签
             if response:
@@ -184,7 +197,16 @@ class PerplexityManager:
         self.lock = Lock()
         self.LOG = logging.getLogger("PerplexityManager")
     
-    def start_request(self, perplexity_instance, prompt, chat_id, send_text_func, receiver, at_user=None):
+    def start_request(
+        self,
+        perplexity_instance,
+        prompt,
+        chat_id,
+        send_text_func,
+        receiver,
+        at_user=None,
+        enable_full_research: bool = False,
+    ):
         """启动Perplexity请求线程
         
         Args:
@@ -194,12 +216,14 @@ class PerplexityManager:
             send_text_func: 发送消息的函数
             receiver: 接收消息的ID
             at_user: 被@的用户ID
+            enable_full_research: 是否启用深度研究模式
             
         Returns:
             bool: 是否成功启动线程
         """
         thread_key = f"{receiver}_{chat_id}"
-        
+        full_research_available = enable_full_research and getattr(perplexity_instance, 'has_reasoning_model', False)
+
         with self.lock:
             # 检查是否已有正在处理的相同请求
             if thread_key in self.threads and self.threads[thread_key].is_alive():
@@ -207,7 +231,10 @@ class PerplexityManager:
                 return False
             
             # 发送等待消息
-            send_text_func("正在联网查询，请稍候...", record_message=False)
+            wait_msg = "正在启用满血模式研究中...." if full_research_available else "正在联网查询，请稍候..."
+            if enable_full_research and not full_research_available:
+                self.LOG.warning("收到满血模式请求，但未配置推理模型，退回普通模式。")
+            send_text_func(wait_msg, at_list=at_user or "", record_message=False)
             
             # 添加线程完成回调，自动清理线程
             def thread_finished_callback():
@@ -224,7 +251,8 @@ class PerplexityManager:
                 send_text_func=send_text_func,
                 receiver=receiver,
                 at_user=at_user,
-                on_finish=thread_finished_callback
+                on_finish=thread_finished_callback,
+                enable_full_research=full_research_available
             )
             
             # 保存线程引用
@@ -276,6 +304,11 @@ class Perplexity:
         self.trigger_keyword = config.get('trigger_keyword', 'ask')
         self.fallback_prompt = config.get('fallback_prompt', "请像 Perplexity 一样，以专业、客观、信息丰富的方式回答问题。不要使用任何tex或者md格式,纯文本输出。")
         self.LOG = logging.getLogger('Perplexity')
+        self.model_flash = config.get('model_flash') or config.get('model', 'sonar')
+        self.model_reasoning = config.get('model_reasoning')
+        if self.model_reasoning and self.model_reasoning.lower() == (self.model_flash or '').lower():
+            self.model_reasoning = None
+        self.has_reasoning_model = bool(self.model_reasoning)
         
         # 权限控制 - 允许使用Perplexity的群聊和个人ID
         self.allowed_groups = config.get('allowed_groups', [])
@@ -346,7 +379,7 @@ class Perplexity:
             return all(value is not None for key, value in args.items() if key != 'proxy')
         return False
         
-    def get_answer(self, prompt, session_id=None):
+    def get_answer(self, prompt, session_id=None, deep_research: bool = False):
         """获取Perplexity回答
         
         Args:
@@ -367,7 +400,9 @@ class Perplexity:
             ]
             
             # 获取模型
-            model = self.config.get('model', 'sonar')
+            model = self.model_reasoning if (deep_research and self.has_reasoning_model) else self.model_flash or self.config.get('model', 'sonar')
+            if deep_research and self.has_reasoning_model:
+                self.LOG.info(f"Perplexity启动深度研究模式，使用模型: {model}")
             
             # 使用json序列化确保正确处理Unicode
             self.LOG.info(f"发送到Perplexity的消息: {json.dumps(messages, ensure_ascii=False)}")
@@ -385,7 +420,16 @@ class Perplexity:
             self.LOG.error(f"调用Perplexity API时发生错误: {str(e)}")
             return f"发生错误: {str(e)}"
     
-    def process_message(self, content, chat_id, sender, roomid, from_group, send_text_func):
+    def process_message(
+        self,
+        content,
+        chat_id,
+        sender,
+        roomid,
+        from_group,
+        send_text_func,
+        enable_full_research: bool = False,
+    ):
         """处理可能包含Perplexity触发词的消息
         
         Args:
@@ -395,6 +439,7 @@ class Perplexity:
             roomid: 群聊ID（如果是群聊）
             from_group: 是否来自群聊
             send_text_func: 发送消息的函数
+            enable_full_research: 是否启用深度研究模式
             
         Returns:
             tuple[bool, Optional[str]]: 
@@ -414,9 +459,11 @@ class Perplexity:
                     return False, self.fallback_prompt  # 返回 False 表示未处理，并带上备选 prompt
                 else:
                     # 如果只有触发词没有问题，还是按原逻辑处理（发送提示消息）
-                    send_text_func(f"请在{self.trigger_keyword}后面添加您的问题", 
-                                  roomid if from_group else sender,
-                                  sender if from_group else None)
+                    send_text_func(
+                        f"请在{self.trigger_keyword}后面添加您的问题",
+                        at_list=sender if from_group else "",
+                        record_message=False
+                    )
                     return True, None  # 已处理（发送了错误提示）
                 
             prompt = content[len(self.trigger_keyword):].strip()
@@ -432,14 +479,17 @@ class Perplexity:
                     chat_id=chat_id,
                     send_text_func=send_text_func,
                     receiver=receiver,
-                    at_user=at_user
+                    at_user=at_user,
+                    enable_full_research=enable_full_research
                 )
                 return request_started, None  # 返回启动结果，无备选prompt
             else:
                 # 触发词后没有内容
-                send_text_func(f"请在{self.trigger_keyword}后面添加您的问题", 
-                              roomid if from_group else sender,
-                              sender if from_group else None)
+                send_text_func(
+                    f"请在{self.trigger_keyword}后面添加您的问题",
+                    at_list=sender if from_group else "",
+                    record_message=False
+                )
                 return True, None  # 已处理（发送了错误提示）
         
         # 不包含触发词
