@@ -185,13 +185,42 @@ class Robot(Job):
             specific_limit = self._get_specific_history_limit(msg)
             self.LOG.debug(f"本次对话 ({msg.sender} in {msg.roomid or msg.sender}) 使用历史限制: {specific_limit}")
             
-            # 4. 预处理消息，生成MessageContext
+            # 4. 系统消息优先处理
+            if msg.type == 37:  # 好友请求
+                self.autoAcceptFriendRequest(msg)
+                return
+
+            if msg.type == 10000:
+                if "加入了群聊" in msg.content and msg.from_group():
+                    new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
+                    if new_member_match:
+                        inviter = new_member_match.group(1)
+                        new_member = new_member_match.group(2)
+                        welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
+                        self.sendTextMsg(welcome_msg, msg.roomid)
+                        self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
+                    return
+                if "你已添加了" in msg.content:
+                    self.sayHiToNewFriend(msg)
+                    return
+
+            # 5. 预处理消息，生成MessageContext
             ctx = self.preprocess(msg)
             # 确保context能访问到当前选定的chat模型及特定历史限制
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
-            
-            # 5. 根据配置选择路由系统
+
+            # 群聊白名单与@控制
+            if ctx.is_group:
+                allowed_groups = getattr(self.config, 'GROUPS', []) or []
+                if ctx.msg.roomid not in allowed_groups:
+                    self.LOG.debug(f"忽略未在白名单中的群聊消息: {ctx.msg.roomid}")
+                    return
+                if not ctx.is_at_bot:
+                    self.LOG.debug(f"群聊 {ctx.msg.roomid} 未@机器人，忽略消息")
+                    return
+
+            # 6. 根据配置选择路由系统
             handled = False
 
             function_call_config = getattr(self.config, 'FUNCTION_CALL_ROUTER', {})
@@ -213,24 +242,6 @@ class Robot(Job):
                 return
 
             # 7. Function Call 未处理，则执行闲聊兜底或特殊逻辑
-            if msg.type == 37:  # 好友请求
-                self.autoAcceptFriendRequest(msg)
-                return
-
-            if msg.type == 10000:
-                if "加入了群聊" in msg.content and msg.from_group():
-                    new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
-                    if new_member_match:
-                        inviter = new_member_match.group(1)
-                        new_member = new_member_match.group(2)
-                        welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
-                        self.sendTextMsg(welcome_msg, msg.roomid)
-                        self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
-                    return
-                if "你已添加了" in msg.content:
-                    self.sayHiToNewFriend(msg)
-                    return
-
             if not (ctx.is_group and not ctx.is_at_bot):
                 if not run_chat_fallback(ctx):
                     self.LOG.warning("闲聊兜底失败或未发送回复")
