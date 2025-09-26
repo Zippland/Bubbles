@@ -83,23 +83,40 @@ def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
     """AI路由的Perplexity搜索处理"""
     import json
 
-    params = params.strip()
-
-    if not params:
-        at_list = ctx.msg.sender if ctx.is_group else ""
-        ctx.send_text("请告诉我你想搜索什么内容", at_list)
-        return True
+    original_params = params
 
     deep_research = False
-    query = params
-    if params.startswith("{"):
-        try:
-            parsed = json.loads(params)
-            if isinstance(parsed, dict):
-                query = parsed.get("query") or parsed.get("q") or ""
-                mode = parsed.get("mode") or parsed.get("research_mode")
-                deep_research = bool(parsed.get("deep_research") or parsed.get("full_research") or (isinstance(mode, str) and mode.lower() in {"deep", "full", "research"}))
-        except json.JSONDecodeError:
+    query = ""
+
+    if isinstance(params, dict):
+        query = params.get("query") or params.get("q") or ""
+        mode = params.get("mode") or params.get("research_mode")
+        deep_research = bool(
+            params.get("deep_research")
+            or params.get("full_research")
+            or (isinstance(mode, str) and mode.lower() in {"deep", "full", "research"})
+        )
+    else:
+        params = str(params or "").strip()
+        if not params:
+            at_list = ctx.msg.sender if ctx.is_group else ""
+            ctx.send_text("请告诉我你想搜索什么内容", at_list)
+            return True
+
+        if params.startswith("{"):
+            try:
+                parsed = json.loads(params)
+                if isinstance(parsed, dict):
+                    query = parsed.get("query") or parsed.get("q") or ""
+                    mode = parsed.get("mode") or parsed.get("research_mode")
+                    deep_research = bool(
+                        parsed.get("deep_research")
+                        or parsed.get("full_research")
+                        or (isinstance(mode, str) and mode.lower() in {"deep", "full", "research"})
+                    )
+            except json.JSONDecodeError:
+                query = params
+        if not query:
             query = params
 
     if not isinstance(query, str):
@@ -140,7 +157,15 @@ def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
             try:
                 import time
                 current_time = time.strftime("%H:%M", time.localtime())
-                q_with_info = f"[{current_time}] {ctx.sender_name}: {params}"
+                if isinstance(original_params, str):
+                    formatted_request = original_params
+                else:
+                    try:
+                        formatted_request = json.dumps(original_params, ensure_ascii=False)
+                    except Exception:
+                        formatted_request = str(original_params)
+
+                q_with_info = f"[{current_time}] {ctx.sender_name}: {formatted_request}"
                 
                 rsp = chat_model.get_answer(
                     question=q_with_info,
