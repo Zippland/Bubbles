@@ -276,7 +276,8 @@ class Robot(Job):
                 reasoning_chat = self._get_reasoning_chat_model()
                 if reasoning_chat:
                     ctx.chat = reasoning_chat
-                    self.LOG.debug(f"使用推理模型 {reasoning_chat} 处理消息")
+                    model_label = self._describe_chat_model(reasoning_chat, reasoning=True)
+                    self.LOG.debug(f"使用推理模型 {model_label} 处理消息")
                 else:
                     self.LOG.warning("当前模型未配置推理模型，使用默认模型处理深度思考请求")
 
@@ -295,15 +296,15 @@ class Robot(Job):
 
             # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）
             if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
-                print(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
+                self.LOG.debug(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
                 handled = ai_router.dispatch(ctx)
-                print(f"[AI路由调试] AI路由器处理结果: {handled}")
+                self.LOG.debug(f"[AI路由调试] AI路由器处理结果: {handled}")
                 if handled:
                     self.LOG.info("消息已由AI路由器处理")
-                    print("[AI路由调试] 消息已成功由AI路由器处理")
+                    self.LOG.debug("[AI路由调试] 消息已成功由AI路由器处理")
                     return
                 else:
-                    print("[AI路由调试] AI路由器未处理该消息")
+                    self.LOG.warning("[AI路由调试] AI路由器未处理该消息")
 
             # 6. 如果AI路由器未处理，则进行特殊逻辑处理
             if not handled:
@@ -546,6 +547,33 @@ class Robot(Job):
         if model_id is None:
             return None
         return self.reasoning_chat_models.get(model_id)
+
+    def _describe_chat_model(self, chat_model, reasoning: bool = False) -> str:
+        """根据配置返回模型名称，默认回退到实例类名"""
+        model_id = getattr(self, 'current_model_id', None)
+        config_entry = self._get_model_config(model_id) if model_id is not None else None
+
+        if config_entry:
+            if reasoning:
+                label = config_entry.get("model_reasoning")
+                if label:
+                    return label
+            label = config_entry.get("model_flash")
+            if label:
+                return label
+
+        if chat_model and isinstance(getattr(chat_model, '__class__', None), type):
+            return chat_model.__class__.__name__
+        return "未知模型"
+
+    def _get_model_config(self, model_id: int):
+        mapping = {
+            ChatType.CHATGPT.value: getattr(self.config, 'CHATGPT', None),
+            ChatType.DEEPSEEK.value: getattr(self.config, 'DEEPSEEK', None),
+            ChatType.GEMINI.value: getattr(self.config, 'GEMINI', None),
+            ChatType.PERPLEXITY.value: getattr(self.config, 'PERPLEXITY', None),
+        }
+        return mapping.get(model_id)
 
 
     def _select_model_for_message(self, msg: WxMsg) -> None:

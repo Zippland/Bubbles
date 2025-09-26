@@ -38,7 +38,7 @@ class MessageContext:
                 if self.logger:
                     self.logger.error(f"获取群 {self.msg.roomid} 成员失败: {e}")
                 else:
-                    print(f"获取群 {self.msg.roomid} 成员失败: {e}")
+                    self.logger.error(f"获取群 {self.msg.roomid} 成员失败: {e}")    
                 self._room_members = {}  # 出错时返回空字典
         return self._room_members
 
@@ -54,7 +54,7 @@ class MessageContext:
                 if self.logger:
                     self.logger.error(f"获取群 {self.msg.roomid} 成员 {self.msg.sender} 昵称失败: {e}")
                 else:
-                    print(f"获取群 {self.msg.roomid} 成员 {self.msg.sender} 昵称失败: {e}")
+                    self.logger.error(f"获取群 {self.msg.roomid} 成员 {self.msg.sender} 昵称失败: {e}")
         
         # 群昵称获取失败或私聊，返回通讯录昵称
         return self.all_contacts.get(self.msg.sender, self.msg.sender)  # 兜底返回 wxid
@@ -80,11 +80,11 @@ class MessageContext:
                 if self.logger:
                     self.logger.error(f"发送消息失败: {e}")
                 else:
-                    print(f"发送消息失败: {e}")
+                    self.logger.error(f"发送消息失败: {e}")
                 return False
         else:
             if self.logger:
                 self.logger.error("Robot实例不存在或没有sendTextMsg方法")
             else:
-                print("Robot实例不存在或没有sendTextMsg方法")
+                self.logger.error("Robot实例不存在或没有sendTextMsg方法")
             return False
