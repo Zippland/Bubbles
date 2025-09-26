@@ -59,27 +59,6 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
 - 支持为功能提供描述、示例和参数说明，帮助模型精准调用
 - 通过装饰器注册新功能即可扩展机器人能力
 
-#### 路由系统架构图
-
-```mermaid
-flowchart TD
-    A[User Message] --> B[Message Preprocessing]
-    B --> C{私聊或@机器人?}
-    C -->|No| D[忽略消息]
-    C -->|Yes| E[AI Router]
-    E --> F[AI Analyze Intent]
-    F --> G{Function Decision?}
-    G -->|Function| H[Call Registered Handler]
-    G -->|Chat| I[AI Conversation]
-    H --> J[Return Result]
-    I --> J
-
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style E fill:#bfb,stroke:#333,stroke-width:2px
-    style H fill:#bbf,stroke:#333,stroke-width:2px
-    style J fill:#fbb,stroke:#333,stroke-width:2px
-```
-
 消息处理流程说明：
 1. **消息预处理**：系统接收用户消息，提取纯文本、发送者等上下文
 2. **权限判断**：仅在私聊或群聊中被 @ 时才进入 AI 路由，避免打扰其他群成员
