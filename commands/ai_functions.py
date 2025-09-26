@@ -74,10 +74,10 @@ def ai_handle_reminder_delete(ctx: MessageContext, params: str) -> bool:
     description="在网络上搜索任何问题",
     examples=[
         "搜索Python最新特性",
-        "查查机器学习教程",
-        '{"query":"量子计算发展", "deep_research": false}'
+        '深圳天气咋样'
+        '{"query":"量子计算发展历史的详细研究报告", "deep_research": true}'
     ],
-    params_description="可直接填写搜索内容；若问题极其复杂且需要长时间深度研究，能接收花费大量时间和费用，请传 JSON，如 {\"query\":\"主题\", \"deep_research\": true}\n只有当问题确实十分复杂、需要长时间联网深度研究时，才在 params 中加入 JSON 字段 \"deep_research\": true；否则保持默认以节省时间和费用。"
+    params_description="可直接填写搜索内容；只有当问题确实十分复杂、需要长时间联网深度研究时，才在 params 中使用 JSON 字段，如 {\"query\":\"主题\", \"deep_research\": true}，否则保持默认以节省时间和费用。"
 )
 def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
     """AI路由的Perplexity搜索处理"""
