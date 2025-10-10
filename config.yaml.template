@@ -79,9 +79,6 @@ MAX_HISTORY: 300 # 记录数据库的消息历史
 news:
   receivers: ["filehelper"]  # 定时新闻接收人（roomid 或者 wxid）
 
-report_reminder:
-  receivers: []  # 定时日报周报月报提醒（roomid 或者 wxid）
-
 # 消息发送速率限制：一分钟内最多发送6条消息
 send_rate_limit: 6
 

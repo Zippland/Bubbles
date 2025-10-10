@@ -166,7 +166,6 @@ GROUP_MODELS:
 # 功能开关
   news_report # 每日新闻推送
   weather_report  # 每日天气推送
-  report_reminder # 日报周报月报提醒
   image_generation  # AI生图
   perplexity  # perplexity
 ```

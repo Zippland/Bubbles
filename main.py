@@ -35,7 +35,6 @@ logging.getLogger("commands").setLevel(logging.WARNING)
 # 临时调试：为AI路由器设置更详细的日志级别
 logging.getLogger("commands.ai_router").setLevel(logging.INFO)
 
-from function.func_report_reminder import ReportReminder
 from configuration import Config
 from constants import ChatType
 from robot import Robot, __version__
@@ -76,8 +75,6 @@ def main(chat_type: int):
     # 每天 7:30 发送新闻
     robot.onEveryTime("07:30", robot.newsReport)
 
-    # 每天 16:30 提醒发日报周报月报
-    robot.onEveryTime("17:00", ReportReminder.remind, robot=robot)
 
     # 让机器人一直跑
     robot.keepRunningAndBlockProcess()
