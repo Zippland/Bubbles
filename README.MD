@@ -46,6 +46,13 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
 
 <img src="img_1.jpg" width="250"/> <img src="img_2.jpg" width="250"/> <img src="img_3.png" width="250"/> <img src="img_4.png" width="250"/>
 
+## 🔩 更新日志
+
+- 2025-10-13 支持 Agentic Rag 的历史记录查找方式
+- 2025-09-25 支持完全的 Agentic Routing 驱动，无需用户感知
+- 之前的就先不记录了
+
+
 ## ✨ 核心特性
 
 #### 🤖 灵活的模型配置
