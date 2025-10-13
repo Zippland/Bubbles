@@ -310,7 +310,11 @@ class Robot(Job):
             if not handled:
                 # 7.1 好友请求自动处理
                 if msg.type == 37:  # 好友请求
-                    self.autoAcceptFriendRequest(msg)
+                    if getattr(self.config, "AUTO_ACCEPT_FRIEND_REQUEST", False):
+                        self.LOG.info("检测到好友请求，自动通过开关已启用，准备同意。")
+                        self.autoAcceptFriendRequest(msg)
+                    else:
+                        self.LOG.info("检测到好友请求，自动通过开关已关闭，保持待处理状态。")
                     return
                     
                 # 7.2 系统消息处理
@@ -457,7 +461,10 @@ class Robot(Job):
         if nickName:
             # 添加了好友，更新好友列表
             self.allContacts[msg.sender] = nickName[0]
-            self.sendTextMsg(f"Hi {nickName[0]}，我是泡泡，我自动通过了你的好友请求。", msg.sender)
+            greeting = f"Hi {nickName[0]}，我是泡泡，很高兴认识你。"
+            if getattr(self.config, "AUTO_ACCEPT_FRIEND_REQUEST", False):
+                greeting = f"Hi {nickName[0]}，我是泡泡，我自动通过了你的好友请求。"
+            self.sendTextMsg(greeting, msg.sender)
 
     def newsReport(self) -> None:
         receivers = self.config.NEWS

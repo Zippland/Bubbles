@@ -148,3 +148,5 @@ perplexity:  # -----perplexity配置这行不填-----
 ai_router:  # -----AI路由器配置-----
   enable: true  # 是否启用AI路由功能
   allowed_groups: []  # 允许使用AI路由的群聊ID列表，例如：["123456789@chatroom", "123456789@chatroom"]
+
+auto_accept_friend_request: false  # 是否自动通过好友申请，默认关闭

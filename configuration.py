@@ -41,5 +41,6 @@ class Config(object):
         self.GEMINI_IMAGE = yconfig.get("gemini_image", {})
         self.GEMINI = yconfig.get("gemini", {})
         self.AI_ROUTER = yconfig.get("ai_router", {"enable": True, "allowed_groups": []})
+        self.AUTO_ACCEPT_FRIEND_REQUEST = yconfig.get("auto_accept_friend_request", False)
         self.MAX_HISTORY = yconfig.get("MAX_HISTORY", 300)
         self.SEND_RATE_LIMIT = yconfig.get("send_rate_limit", 0)
