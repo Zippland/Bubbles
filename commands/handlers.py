@@ -166,17 +166,16 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 "function": {
                     "name": "search_chat_history",
                     "description": (
-                        "Search recent conversation history for specific keywords. "
-                        "Returns at most 20 recent segments, each including the matched message "
-                        "with five surrounding messages (if available) and timestamps. "
-                        "Use this tool when you need precise historical context."
+                        "Search older conversation history (excluding the most recent 30 messages) using multiple related keywords. "
+                        "Provide 2-4 diverse keywords or short phrases that capture the user's intent; synonyms and key names greatly improve recall. "
+                        "The tool returns up to 20 recent segments, each containing deduplicated context lines that have already been formatted."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "keywords": {
                                 "type": "array",
-                                "description": "List of keywords to search for in message content.",
+                                "description": "Diverse keywords or short phrases (2-4 recommended) for fuzzy searching message content.",
                                 "items": {"type": "string"},
                                 "minItems": 1
                             },
@@ -202,83 +201,186 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 }
             }
 
+            range_history_tool = {
+                "type": "function",
+                "function": {
+                    "name": "fetch_chat_history_range",
+                    "description": (
+                        "Retrieve a slice of older conversation by specifying two offsets counted from the latest message "
+                        "(e.g., start_offset=60, end_offset=120 fetches messages between the 60th and 120th most recent). "
+                        "Both offsets must be greater than 30 so that only unseen history is retrieved. "
+                        "Use when you need a contiguous block of messages instead of keyword search."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "start_offset": {
+                                "type": "integer",
+                                "description": "Smaller offset counted from the latest message (must be >30)."
+                            },
+                            "end_offset": {
+                                "type": "integer",
+                                "description": "Larger offset counted from the latest message (must be > start_offset and >30)."
+                            }
+                        },
+                        "required": ["start_offset", "end_offset"],
+                        "additionalProperties": False
+                    }
+                }
+            }
+
             def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
-                if tool_name != "search_chat_history":
-                    return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
-
                 try:
-                    keywords = arguments.get("keywords", [])
-                    if isinstance(keywords, str):
-                        keywords = [keywords]
-                    elif not isinstance(keywords, list):
-                        keywords = []
+                    if tool_name == "search_chat_history":
+                        keywords = arguments.get("keywords", [])
+                        if isinstance(keywords, str):
+                            keywords = [keywords]
+                        elif not isinstance(keywords, list):
+                            keywords = []
 
-                    query = arguments.get("query")
-                    if isinstance(query, str) and query.strip():
-                        query_keywords = [segment for segment in query.strip().split() if segment]
-                        keywords.extend(query_keywords)
+                        query = arguments.get("query")
+                        if isinstance(query, str) and query.strip():
+                            query_keywords = [
+                                segment
+                                for segment in re.split(r"[,\s，。；;]+", query.strip())
+                                if segment
+                            ]
+                            keywords.extend(query_keywords)
 
-                    cleaned_keywords = []
-                    for kw in keywords:
-                        if kw is None:
-                            continue
-                        kw_str = str(kw).strip()
-                        if kw_str:
-                            cleaned_keywords.append(kw_str)
+                        cleaned_keywords = []
+                        for kw in keywords:
+                            if kw is None:
+                                continue
+                            kw_str = str(kw).strip()
+                            if kw_str:
+                                if len(kw_str) == 1 and not kw_str.isdigit():
+                                    continue
+                                cleaned_keywords.append(kw_str)
 
-                    # 去重同时保持顺序
-                    seen = set()
-                    deduped_keywords = []
-                    for kw in cleaned_keywords:
-                        lower_kw = kw.lower()
-                        if lower_kw not in seen:
-                            seen.add(lower_kw)
-                            deduped_keywords.append(kw)
+                        # 去重同时保持顺序
+                        seen = set()
+                        deduped_keywords = []
+                        for kw in cleaned_keywords:
+                            lower_kw = kw.lower()
+                            if lower_kw not in seen:
+                                seen.add(lower_kw)
+                                deduped_keywords.append(kw)
 
-                    if not deduped_keywords:
-                        return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
+                        if not deduped_keywords:
+                            return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
 
-                    context_window = arguments.get("context_window", 5)
-                    max_results = arguments.get("max_results", 20)
+                        context_window = arguments.get("context_window", 5)
+                        max_results = arguments.get("max_results", 20)
 
-                    print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
-                          f"context_window={context_window}, max_results={max_results}")
-                    if ctx.logger:
-                        ctx.logger.info(
-                            f"[search_chat_history] keywords={deduped_keywords}, "
-                            f"context_window={context_window}, max_results={max_results}"
+                        print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
+                              f"context_window={context_window}, max_results={max_results}")
+                        if ctx.logger:
+                            ctx.logger.info(
+                                f"[search_chat_history] keywords={deduped_keywords}, "
+                                f"context_window={context_window}, max_results={max_results}"
+                            )
+
+                        search_results = message_summary.search_messages_with_context(
+                            chat_id=chat_id,
+                            keywords=deduped_keywords,
+                            context_window=context_window,
+                            max_groups=max_results
                         )
 
-                    search_results = message_summary.search_messages_with_context(
-                        chat_id=chat_id,
-                        keywords=deduped_keywords,
-                        context_window=context_window,
-                        max_groups=max_results
-                    )
+                        segments = []
+                        lines_seen = set()
+                        for segment in search_results:
+                            formatted = []
+                            for line in segment.get("formatted_messages", []):
+                                if line not in lines_seen:
+                                    lines_seen.add(line)
+                                    formatted.append(line)
+                            if not formatted:
+                                continue
+                            segments.append({
+                                "matched_keywords": segment.get("matched_keywords", []),
+                                "messages": formatted
+                            })
 
-                    response_payload = {
-                        "results": search_results,
-                        "returned_groups": len(search_results),
-                        "keywords": deduped_keywords
-                    }
+                        response_payload = {
+                            "segments": segments,
+                            "returned_groups": len(segments),
+                            "keywords": deduped_keywords
+                        }
 
-                    print(f"[search_chat_history] returned_groups={len(search_results)}")
-                    if ctx.logger:
-                        ctx.logger.info(f"[search_chat_history] returned_groups={len(search_results)}")
+                        print(f"[search_chat_history] returned_groups={len(segments)}")
+                        if ctx.logger:
+                            ctx.logger.info(f"[search_chat_history] returned_groups={len(segments)}")
 
-                    if not search_results:
-                        response_payload["notice"] = "No messages matched the provided keywords."
+                        if not segments:
+                            response_payload["notice"] = "No messages matched the provided keywords."
 
-                    return json.dumps(response_payload, ensure_ascii=False)
+                        return json.dumps(response_payload, ensure_ascii=False)
+
+                    elif tool_name == "fetch_chat_history_range":
+                        if "start_offset" not in arguments or "end_offset" not in arguments:
+                            return json.dumps({"error": "start_offset and end_offset are required."}, ensure_ascii=False)
+
+                        start_offset = arguments.get("start_offset")
+                        end_offset = arguments.get("end_offset")
+
+                        try:
+                            start_offset = int(start_offset)
+                            end_offset = int(end_offset)
+                        except (TypeError, ValueError):
+                            return json.dumps({"error": "start_offset and end_offset must be integers."}, ensure_ascii=False)
+
+                        if start_offset <= 30 or end_offset <= 30:
+                            return json.dumps({"error": "Offsets must be greater than 30 to avoid visible messages."}, ensure_ascii=False)
+
+                        if start_offset > end_offset:
+                            start_offset, end_offset = end_offset, start_offset
+
+                        print(f"[fetch_chat_history_range] chat_id={chat_id}, start_offset={start_offset}, "
+                              f"end_offset={end_offset}")
+                        if ctx.logger:
+                            ctx.logger.info(
+                                f"[fetch_chat_history_range] start_offset={start_offset}, "
+                                f"end_offset={end_offset}"
+                            )
+
+                        range_result = message_summary.get_messages_by_reverse_range(
+                            chat_id=chat_id,
+                            start_offset=start_offset,
+                            end_offset=end_offset
+                        )
+
+                        response_payload = {
+                            "start_offset": range_result.get("start_offset"),
+                            "end_offset": range_result.get("end_offset"),
+                            "messages": range_result.get("messages", []),
+                            "returned_count": range_result.get("returned_count", 0),
+                            "total_messages": range_result.get("total_messages", 0)
+                        }
+
+                        print(f"[fetch_chat_history_range] returned_count={response_payload['returned_count']}")
+                        if ctx.logger:
+                            ctx.logger.info(
+                                f"[fetch_chat_history_range] returned_count={response_payload['returned_count']}"
+                            )
+
+                        if response_payload["returned_count"] == 0:
+                            response_payload["notice"] = "No messages available in the requested range."
+
+                        return json.dumps(response_payload, ensure_ascii=False)
+
+                    else:
+                        return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
+
                 except Exception as tool_exc:
                     if ctx.logger:
-                        ctx.logger.error(f"搜索历史工具调用失败: {tool_exc}", exc_info=True)
+                        ctx.logger.error(f"历史搜索工具调用失败: {tool_exc}", exc_info=True)
                     return json.dumps(
-                        {"error": f"Search failed: {tool_exc.__class__.__name__}"},
+                        {"error": f"History tool failed: {tool_exc.__class__.__name__}"},
                         ensure_ascii=False
                     )
 
-            tools = [search_history_tool]
+            tools = [search_history_tool, range_history_tool]
             tool_handler = handle_tool_call
 
         rsp = chat_model.get_answer(

@@ -240,7 +240,14 @@ class MessageSummary:
 
         return messages
 
-    def search_messages_with_context(self, chat_id, keywords, context_window=5, max_groups=20):
+    def search_messages_with_context(
+        self,
+        chat_id,
+        keywords,
+        context_window=5,
+        max_groups=20,
+        exclude_recent=30
+    ):
         """根据关键词搜索消息，返回包含前后上下文的结果
 
         Args:
@@ -248,6 +255,7 @@ class MessageSummary:
             keywords (Union[str, list[str]]): 需要搜索的关键词或关键词列表
             context_window (int): 每条匹配消息前后额外提供的消息数量
             max_groups (int): 返回的最多结果组数（按时间倒序，优先最新消息）
+            exclude_recent (int): 跳过最近的若干条消息（默认30条）
 
         Returns:
             list[dict]: 搜索结果列表，每个元素包含匹配关键词、锚点消息及上下文消息
@@ -285,18 +293,32 @@ class MessageSummary:
         if not messages:
             return []
 
+        try:
+            exclude_recent = int(exclude_recent)
+        except (TypeError, ValueError):
+            exclude_recent = 30
+        exclude_recent = max(0, exclude_recent)
+
         results = []
         total_messages = len(messages)
+        cutoff_index = total_messages - exclude_recent
+        if cutoff_index <= 0:
+            return []
+
         used_indices = set()
 
-        for idx in range(total_messages - 1, -1, -1):
+        for idx in range(cutoff_index - 1, -1, -1):
             message = messages[idx]
             content = message.get("content", "")
             if not content:
                 continue
 
             lower_content = content.lower()
-            matched_keywords = [orig for orig, lower in normalized_keywords if lower in lower_content]
+            matched_keywords = [
+                orig
+                for orig, lower in normalized_keywords
+                if lower in lower_content
+            ]
             if not matched_keywords:
                 continue
 
@@ -306,9 +328,16 @@ class MessageSummary:
             start = max(0, idx - context_window)
             end = min(total_messages, idx + context_window + 1)
             segment_messages = []
+            formatted_lines = []
+            seen_lines = set()
 
             for pos in range(start, end):
                 msg = messages[pos]
+                line = f"{msg.get('time')} {msg.get('sender')} {msg.get('content')}"
+                if line not in seen_lines:
+                    seen_lines.add(line)
+                    formatted_lines.append(line)
+
                 segment_messages.append({
                     "time": msg.get("time"),
                     "sender": msg.get("sender"),
@@ -324,7 +353,8 @@ class MessageSummary:
                 "anchor_time": message.get("time"),
                 "anchor_sender": message.get("sender"),
                 "anchor_sender_wxid": message.get("sender_wxid"),
-                "messages": segment_messages
+                "messages": segment_messages,
+                "formatted_messages": formatted_lines
             })
 
             for off in range(start, end):
@@ -334,6 +364,85 @@ class MessageSummary:
                 break
 
         return results
+
+    def get_messages_by_reverse_range(
+        self,
+        chat_id,
+        start_offset,
+        end_offset,
+        max_messages_limit=500
+    ):
+        """按倒数范围获取消息
+
+        Args:
+            chat_id (str): 聊天ID（群ID或用户ID）
+            start_offset (int): 离最新消息的起始偏移（倒数 start_offset 条，必须 > 0）
+            end_offset (int): 离最新消息的结束偏移（倒数 end_offset 条，必须 >= start_offset）
+            max_messages_limit (int): 内部限制，防止一次返回过多消息
+
+        Returns:
+            dict: 包含请求范围信息和格式化消息行
+        """
+        try:
+            start_offset = int(start_offset)
+            end_offset = int(end_offset)
+        except (TypeError, ValueError):
+            raise ValueError("start_offset 和 end_offset 必须是整数")
+
+        if start_offset <= 0 or end_offset <= 0:
+            raise ValueError("start_offset 和 end_offset 必须为正整数")
+
+        if start_offset > end_offset:
+            start_offset, end_offset = end_offset, start_offset
+
+        try:
+            max_messages_limit = int(max_messages_limit)
+        except (TypeError, ValueError):
+            max_messages_limit = 500
+        max_messages_limit = max(1, min(max_messages_limit, 1000))
+
+        messages = self.get_messages(chat_id)
+        total_messages = len(messages)
+        if total_messages == 0:
+            return {
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "messages": [],
+                "returned_count": 0,
+                "total_messages": 0
+            }
+
+        start_offset = min(start_offset, total_messages)
+        end_offset = min(end_offset, total_messages)
+
+        start_index = max(total_messages - end_offset, 0)
+        end_index = min(total_messages - start_offset, total_messages - 1)
+
+        if end_index < start_index:
+            return {
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "messages": [],
+                "returned_count": 0,
+                "total_messages": total_messages
+            }
+
+        selected = messages[start_index:end_index + 1]
+        if len(selected) > max_messages_limit:
+            selected = selected[-max_messages_limit:]
+
+        formatted_lines = [
+            f"{msg.get('time')} {msg.get('sender')} {msg.get('content')}"
+            for msg in selected
+        ]
+
+        return {
+            "start_offset": start_offset,
+            "end_offset": end_offset,
+            "messages": formatted_lines,
+            "returned_count": len(formatted_lines),
+            "total_messages": total_messages
+        }
 
     def _basic_summarize(self, messages):
         """基本的消息总结逻辑，不使用AI
@@ -353,77 +462,6 @@ class MessageSummary:
             res.append(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
 
         return "\n".join(res)
-
-    def _ai_summarize(self, messages, chat_model, chat_id):
-        """使用AI模型生成消息总结
-
-        Args:
-            messages: 消息列表 (格式同 get_messages 返回值)
-            chat_model: AI聊天模型对象
-            chat_id: 聊天ID
-
-        Returns:
-            str: 消息总结
-        """
-        if not messages:
-            return "没有可以总结的历史消息。"
-
-        formatted_msgs = []
-        for msg in messages:
-            # 使用新的时间格式和发送者
-            formatted_msgs.append(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
-
-        # 构建提示词 ... (保持不变)
-        prompt = (
-            "你是泡泡，请仔细阅读并分析以下聊天记录，生成一简要的、结构清晰且抓住重点的摘要。\n\n"
-            "摘要格式要求：\n"
-            "1. 使用数字编号列表 (例如 1., 2., 3.) 来组织内容，每个编号代表一个独立的主要讨论主题，不要超过3个主题。\n"
-            "2. 在每个编号的主题下，写成一段不带格式的文字，每个主题单独成段并空行，需包含以下内容：\n"
-            "    - 这个讨论的核心的简要描述。\n"
-            "    - 该讨论的关键成员 (用括号 [用户名] 格式) 和他们的关键发言内容、成员之间的关键互动。\n"
-            "    - 该讨论的讨论结果。\n"
-            "3. 总结需客观、精炼、简短精悍，直接呈现最核心且精简的事实，尽量不要添加额外的评论或分析，不要总结有关自己的事情。\n"
-            "4. 不要暴露出格式，不要说核心是xxx参与者是xxx结果是xxx，自然一点。\n\n"
-            "聊天记录如下：\n" + "\n".join(formatted_msgs)
-        )
-
-        try:
-            # 调用AI部分保持不变，但现在AI模型内部应使用数据库历史记录
-            # 确保调用 get_answer 时，AI模型实例已经关联了 MessageSummary
-            summary = chat_model.get_answer(prompt, f"summary_{chat_id}") # 使用特殊 wxid 避免冲突
-
-
-            if not summary:
-                return self._basic_summarize(messages)
-
-            return summary
-        except Exception as e:
-            self.LOG.error(f"使用AI生成总结失败: {e}")
-            return self._basic_summarize(messages)
-
-    def summarize_messages(self, chat_id, chat_model=None):
-        """生成消息总结
-
-        Args:
-            chat_id: 聊天ID（群ID或用户ID）
-            chat_model: AI聊天模型对象，如果为None则使用基础总结
-
-        Returns:
-            str: 消息总结
-        """
-        messages = self.get_messages(chat_id)
-        if not messages:
-            return "没有可以总结的历史消息。"
-
-        if chat_model:
-             # 检查 chat_model 是否具有 get_answer 方法并且已经初始化了 message_summary
-            if hasattr(chat_model, 'get_answer') and hasattr(chat_model, 'message_summary') and chat_model.message_summary:
-                return self._ai_summarize(messages, chat_model, chat_id)
-            else:
-                self.LOG.warning(f"提供的 chat_model ({type(chat_model)}) 不支持基于数据库历史的总结或未正确初始化。将使用基础总结。")
-                return self._basic_summarize(messages)
-        else:
-            return self._basic_summarize(messages)
 
     def process_message_from_wxmsg(self, msg, wcf, all_contacts, bot_wxid=None):
         """从微信消息对象中处理并记录与总结相关的文本消息
