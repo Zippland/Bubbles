@@ -7,6 +7,7 @@ import base64
 import os
 from datetime import datetime
 import time # 引入 time 模块
+import json
 
 import httpx
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI
@@ -25,7 +26,7 @@ class ChatGPT():
         proxy = conf.get("proxy")
         prompt = conf.get("prompt")
         self.model = conf.get("model", "gpt-3.5-turbo")
-        self.max_history_messages = conf.get("max_history_messages", 10) # 读取配置，默认10条
+        self.max_history_messages = conf.get("max_history_messages", 30) # 默认读取最近30条历史
         self.LOG = logging.getLogger("ChatGPT")
 
         # 存储传入的实例和wxid 
@@ -56,7 +57,17 @@ class ChatGPT():
                 return True
         return False
 
-    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None) -> str:
+    def get_answer(
+        self,
+        question: str,
+        wxid: str,
+        system_prompt_override=None,
+        specific_max_history=None,
+        tools=None,
+        tool_handler=None,
+        tool_choice=None,
+        tool_max_iterations: int = 10
+    ) -> str:
         # 获取并格式化数据库历史记录 
         api_messages = []
 
@@ -104,37 +115,123 @@ class ChatGPT():
         if question: # 确保问题非空
             api_messages.append({"role": "user", "content": question})
 
-        rsp = ""
+        if tools and not tool_handler:
+            # 如果提供了工具但没有处理器，则忽略工具以避免陷入死循环
+            self.LOG.warning("tools 提供但没有 tool_handler，忽略工具定义。")
+            tools = None
+
         try:
-            # 使用格式化后的 api_messages 
-            params = {
-                "model": self.model,
-                "messages": api_messages # 使用从数据库构建的消息列表
-            }
-
-            # 只有非o系列模型才设置temperature
-            if not self.model.startswith("o"):
-                params["temperature"] = 0.2
-
-            ret = self.client.chat.completions.create(**params)
-            rsp = ret.choices[0].message.content
-            rsp = rsp[2:] if rsp.startswith("\n\n") else rsp
-            rsp = rsp.replace("\n\n", "\n")
+            response_text = self._execute_with_tools(
+                api_messages=api_messages,
+                tools=tools,
+                tool_handler=tool_handler,
+                tool_choice=tool_choice,
+                tool_max_iterations=tool_max_iterations
+            )
+            return response_text
 
         except AuthenticationError:
             self.LOG.error("OpenAI API 认证失败，请检查 API 密钥是否正确")
-            rsp = "API认证失败"
+            return "API认证失败"
         except APIConnectionError:
             self.LOG.error("无法连接到 OpenAI API，请检查网络连接")
-            rsp = "网络连接错误"
+            return "网络连接错误"
         except APIError as e1:
             self.LOG.error(f"OpenAI API 返回了错误：{str(e1)}")
-            rsp = f"API错误: {str(e1)}"
+            return f"API错误: {str(e1)}"
         except Exception as e0:
-            self.LOG.error(f"发生未知错误：{str(e0)}")
-            rsp = "发生未知错误"
+            self.LOG.error(f"发生未知错误：{str(e0)}", exc_info=True)
+            return "发生未知错误"
 
-        return rsp
+    def _execute_with_tools(
+        self,
+        api_messages,
+        tools=None,
+        tool_handler=None,
+        tool_choice=None,
+        tool_max_iterations: int = 10
+    ) -> str:
+        """执行带工具调用的对话逻辑"""
+        iterations = 0
+        params_base = {"model": self.model}
+
+        # 只有非o系列模型才设置temperature
+        if not self.model.startswith("o"):
+            params_base["temperature"] = 0.2
+
+        # 确保工具参数格式正确
+        runtime_tools = tools if tools and isinstance(tools, list) else None
+        runtime_tool_choice = tool_choice
+
+        while True:
+            params = dict(params_base)
+            params["messages"] = api_messages
+            if runtime_tools:
+                params["tools"] = runtime_tools
+                if runtime_tool_choice:
+                    params["tool_choice"] = runtime_tool_choice
+
+            ret = self.client.chat.completions.create(**params)
+            choice = ret.choices[0]
+            message = choice.message
+            finish_reason = choice.finish_reason
+
+            if (
+                runtime_tools
+                and message
+                and getattr(message, "tool_calls", None)
+                and finish_reason == "tool_calls"
+                and tool_handler
+            ):
+                iterations += 1
+                api_messages.append({
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": message.tool_calls
+                })
+
+                if tool_max_iterations is not None and iterations > max(tool_max_iterations, 0):
+                    api_messages.append({
+                        "role": "system",
+                        "content": "你已经达到可使用搜索历史工具的最大次数，请停止继续调用该工具，直接根据目前掌握的信息给出最终回答。"
+                    })
+                    runtime_tool_choice = "none"
+                    continue
+
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    raw_arguments = tool_call.function.arguments or "{}"
+                    try:
+                        parsed_arguments = json.loads(raw_arguments)
+                    except json.JSONDecodeError:
+                        parsed_arguments = {"_raw": raw_arguments}
+
+                    try:
+                        tool_output = tool_handler(tool_name, parsed_arguments)
+                    except Exception as handler_exc:
+                        self.LOG.error(f"工具 {tool_name} 执行失败: {handler_exc}", exc_info=True)
+                        tool_output = json.dumps(
+                            {"error": f"{tool_name} failed: {handler_exc.__class__.__name__}"},
+                            ensure_ascii=False
+                        )
+
+                    if not isinstance(tool_output, str):
+                        tool_output = json.dumps(tool_output, ensure_ascii=False)
+
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_output
+                    })
+
+                runtime_tool_choice = None
+                continue
+
+            response_text = message.content if message and message.content else ""
+            if response_text.startswith("\n\n"):
+                response_text = response_text[2:]
+            response_text = response_text.replace("\n\n", "\n")
+            return response_text
 
     def encode_image_to_base64(self, image_path: str) -> str:
         """将图片文件转换为Base64编码

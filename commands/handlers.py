@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .context import MessageContext
 
+DEFAULT_CHAT_HISTORY = 30
+
 def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     """
     处理闲聊，调用AI模型生成回复
@@ -39,8 +41,10 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 specific_max_history = 10
             elif specific_max_history > 300:
                 specific_max_history = 300
-            setattr(ctx, 'specific_max_history', specific_max_history)
-    if ctx.logger and specific_max_history is not None:
+    if specific_max_history is None:
+        specific_max_history = DEFAULT_CHAT_HISTORY
+    setattr(ctx, 'specific_max_history', specific_max_history)
+    if ctx.logger:
         ctx.logger.debug(f"为 {ctx.get_receiver()} 使用特定历史限制: {specific_max_history}")
     
     #  处理引用图片情况
@@ -150,10 +154,128 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             ctx.logger.info(f"【发送内容】将以下消息发送给AI: \n{q_with_info}")
         
         # 调用AI模型，传递特定历史限制
+        tools = None
+        tool_handler = None
+
+        if ctx.robot and getattr(ctx.robot, 'message_summary', None):
+            chat_id = ctx.get_receiver()
+            message_summary = ctx.robot.message_summary
+
+            search_history_tool = {
+                "type": "function",
+                "function": {
+                    "name": "search_chat_history",
+                    "description": (
+                        "Search recent conversation history for specific keywords. "
+                        "Returns at most 20 recent segments, each including the matched message "
+                        "with five surrounding messages (if available) and timestamps. "
+                        "Use this tool when you need precise historical context."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "keywords": {
+                                "type": "array",
+                                "description": "List of keywords to search for in message content.",
+                                "items": {"type": "string"},
+                                "minItems": 1
+                            },
+                            "query": {
+                                "type": "string",
+                                "description": "Optional free-form string; will be split into keywords by whitespace."
+                            },
+                            "context_window": {
+                                "type": "integer",
+                                "description": "How many messages before and after each match to include (default 5, max 10).",
+                                "minimum": 0,
+                                "maximum": 10
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of result segments to return (default 20).",
+                                "minimum": 1,
+                                "maximum": 20
+                            }
+                        },
+                        "additionalProperties": False
+                    }
+                }
+            }
+
+            def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
+                if tool_name != "search_chat_history":
+                    return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
+
+                try:
+                    keywords = arguments.get("keywords", [])
+                    if isinstance(keywords, str):
+                        keywords = [keywords]
+                    elif not isinstance(keywords, list):
+                        keywords = []
+
+                    query = arguments.get("query")
+                    if isinstance(query, str) and query.strip():
+                        query_keywords = [segment for segment in query.strip().split() if segment]
+                        keywords.extend(query_keywords)
+
+                    cleaned_keywords = []
+                    for kw in keywords:
+                        if kw is None:
+                            continue
+                        kw_str = str(kw).strip()
+                        if kw_str:
+                            cleaned_keywords.append(kw_str)
+
+                    # 去重同时保持顺序
+                    seen = set()
+                    deduped_keywords = []
+                    for kw in cleaned_keywords:
+                        lower_kw = kw.lower()
+                        if lower_kw not in seen:
+                            seen.add(lower_kw)
+                            deduped_keywords.append(kw)
+
+                    if not deduped_keywords:
+                        return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
+
+                    context_window = arguments.get("context_window", 5)
+                    max_results = arguments.get("max_results", 20)
+
+                    search_results = message_summary.search_messages_with_context(
+                        chat_id=chat_id,
+                        keywords=deduped_keywords,
+                        context_window=context_window,
+                        max_groups=max_results
+                    )
+
+                    response_payload = {
+                        "results": search_results,
+                        "returned_groups": len(search_results),
+                        "keywords": deduped_keywords
+                    }
+
+                    if not search_results:
+                        response_payload["notice"] = "No messages matched the provided keywords."
+
+                    return json.dumps(response_payload, ensure_ascii=False)
+                except Exception as tool_exc:
+                    if ctx.logger:
+                        ctx.logger.error(f"搜索历史工具调用失败: {tool_exc}", exc_info=True)
+                    return json.dumps(
+                        {"error": f"Search failed: {tool_exc.__class__.__name__}"},
+                        ensure_ascii=False
+                    )
+
+            tools = [search_history_tool]
+            tool_handler = handle_tool_call
+
         rsp = chat_model.get_answer(
             question=q_with_info, 
             wxid=ctx.get_receiver(),
-            specific_max_history=specific_max_history
+            specific_max_history=specific_max_history,
+            tools=tools,
+            tool_handler=tool_handler,
+            tool_max_iterations=10
         )
         
         if rsp:

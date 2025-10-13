@@ -21,7 +21,7 @@ except ImportError:
 class Gemini:
     DEFAULT_MODEL = "gemini-1.5-pro-latest"
     DEFAULT_PROMPT = "You are a helpful assistant."
-    DEFAULT_MAX_HISTORY = 15
+    DEFAULT_MAX_HISTORY = 30
     SAFETY_SETTINGS = { # 默认安全设置 - 可根据需要调整或从配置加载
         safety_types.HarmCategory.HARM_CATEGORY_HARASSMENT: safety_types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
         safety_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: safety_types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
@@ -206,13 +206,26 @@ class Gemini:
 
         return rsp_text.strip()
 
-    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None) -> str:
+    def get_answer(
+        self,
+        question: str,
+        wxid: str,
+        system_prompt_override=None,
+        specific_max_history=None,
+        tools=None,
+        tool_handler=None,
+        tool_choice=None,
+        tool_max_iterations: int = 10
+    ) -> str:
         if not self._model:
             return "Gemini 模型未成功初始化，请检查配置和网络。"
 
         if not question:
             self.LOG.warning(f"尝试为 wxid={wxid} 获取答案，但问题为空。")
             return "您没有提问哦。"
+
+        if tools:
+            self.LOG.debug("Gemini 提供的实现暂不支持工具调用，请忽略 tools 参数。")
 
         # 1. 准备历史消息
         contents = []

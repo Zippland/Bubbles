@@ -7,7 +7,7 @@ from .context import MessageContext
 
 logger = logging.getLogger(__name__)
 
-ROUTING_HISTORY_LIMIT = 10
+ROUTING_HISTORY_LIMIT = 30
 CHAT_HISTORY_MIN = 10
 CHAT_HISTORY_MAX = 300
 
@@ -85,8 +85,7 @@ class AIRouter:
 
         1. 如果用户只是聊天或者不匹配任何功能，返回：
         {
-            "action_type": "chat",
-            "history_messages": 25  # 你认为闲聊需要的历史条数，介于10-300之间
+            "action_type": "chat"
         }
         
         2.如果用户需要使用上述功能之一，返回：
@@ -99,14 +98,13 @@ class AIRouter:
         #### 示例：
         - 用户输入"提醒我下午3点开会" -> {"action_type": "function", "function_name": "reminder_set", "params": "下午3点开会"}
         - 用户输入"查看我的提醒" -> {"action_type": "function", "function_name": "reminder_list", "params": ""}
-        - 用户输入"你好" -> {"action_type": "chat", "history_messages": 15}
+        - 用户输入"你好" -> {"action_type": "chat"}
         - 用户输入"查一下Python教程" -> {"action_type": "function", "function_name": "perplexity_search", "params": "Python教程"}
 
         #### 格式注意事项：
         1. action_type 只能是 "function" 或 "chat"
         2. 只返回JSON，无需其他解释
         3. function_name 必须完全匹配上述功能列表中的名称
-        4. 当 action_type 是 "chat" 时，必须提供整数 history_messages 字段，范围为10-300
         """
         return prompt
     
@@ -172,17 +170,7 @@ class AIRouter:
                     self.logger.warning(f"AI路由器：未知的功能名 - {function_name}")
                     return False, None
             
-            if action_type == "chat":
-                history_value = decision.get("history_messages")
-                try:
-                    history_value = int(history_value)
-                except (TypeError, ValueError):
-                    history_value = CHAT_HISTORY_MIN
-                history_value = max(CHAT_HISTORY_MIN, min(CHAT_HISTORY_MAX, history_value))
-                decision["history_messages"] = history_value
-                self.logger.info(f"AI路由决策: {decision}")
-            else:
-                self.logger.info(f"AI路由决策: {decision}")
+            self.logger.info(f"AI路由决策: {decision}")
             return True, decision
             
         except json.JSONDecodeError as e:
@@ -245,14 +233,7 @@ class AIRouter:
         
         # 如果是聊天，返回False让后续处理器处理
         if action_type == "chat":
-            history_limit = decision.get("history_messages", CHAT_HISTORY_MIN)
-            try:
-                history_limit = int(history_limit)
-            except (TypeError, ValueError):
-                history_limit = CHAT_HISTORY_MIN
-            history_limit = max(CHAT_HISTORY_MIN, min(CHAT_HISTORY_MAX, history_limit))
-            setattr(ctx, 'specific_max_history', history_limit)
-            self.logger.info(f"AI路由器：识别为聊天意图，交给聊天处理器，使用历史条数 {history_limit}")
+            self.logger.info("AI路由器：识别为聊天意图，交给聊天处理器处理。")
             return False
         
         # 如果是功能调用

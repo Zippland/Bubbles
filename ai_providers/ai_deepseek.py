@@ -5,6 +5,7 @@
 import logging
 from datetime import datetime
 import time # 引入 time 模块
+import json
 
 import httpx
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI
@@ -23,7 +24,7 @@ class DeepSeek():
         prompt = conf.get("prompt")
         self.model = conf.get("model", "deepseek-chat")
         # 读取最大历史消息数配置 
-        self.max_history_messages = conf.get("max_history_messages", 10) # 读取配置，默认10条
+        self.max_history_messages = conf.get("max_history_messages", 30) # 默认使用最近30条历史
         self.LOG = logging.getLogger("DeepSeek")
 
         # 存储传入的实例和wxid 
@@ -52,7 +53,17 @@ class DeepSeek():
                 return True
         return False
 
-    def get_answer(self, question: str, wxid: str, system_prompt_override=None, specific_max_history=None) -> str:
+    def get_answer(
+        self,
+        question: str,
+        wxid: str,
+        system_prompt_override=None,
+        specific_max_history=None,
+        tools=None,
+        tool_handler=None,
+        tool_choice=None,
+        tool_max_iterations: int = 10
+    ) -> str:
         # 获取并格式化数据库历史记录 
         api_messages = []
 
@@ -100,24 +111,106 @@ class DeepSeek():
         if question:
             api_messages.append({"role": "user", "content": question})
 
+        if tools and not tool_handler:
+            self.LOG.warning("tools 提供但未传入 tool_handler，忽略工具配置。")
+            tools = None
+
         try:
-            # 使用格式化后的 api_messages 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=api_messages, # 使用构建的消息列表
-                stream=False
+            final_response = self._execute_with_tools(
+                api_messages=api_messages,
+                tools=tools,
+                tool_handler=tool_handler,
+                tool_choice=tool_choice,
+                tool_max_iterations=tool_max_iterations
             )
-            final_response = response.choices[0].message.content
-
-
             return final_response
 
         except (APIConnectionError, APIError, AuthenticationError) as e1:
             self.LOG.error(f"DeepSeek API 返回了错误：{str(e1)}")
             return f"DeepSeek API 返回了错误：{str(e1)}"
         except Exception as e0:
-            self.LOG.error(f"发生未知错误：{str(e0)}")
+            self.LOG.error(f"发生未知错误：{str(e0)}", exc_info=True)
             return "抱歉，处理您的请求时出现了错误"
+
+    def _execute_with_tools(
+        self,
+        api_messages,
+        tools=None,
+        tool_handler=None,
+        tool_choice=None,
+        tool_max_iterations: int = 10
+    ) -> str:
+        iterations = 0
+        params_base = {"model": self.model, "stream": False}
+
+        runtime_tools = tools if tools and isinstance(tools, list) else None
+        runtime_tool_choice = tool_choice
+
+        while True:
+            params = dict(params_base)
+            params["messages"] = api_messages
+            if runtime_tools:
+                params["tools"] = runtime_tools
+                if runtime_tool_choice:
+                    params["tool_choice"] = runtime_tool_choice
+
+            response = self.client.chat.completions.create(**params)
+            choice = response.choices[0]
+            message = choice.message
+            finish_reason = choice.finish_reason
+
+            if (
+                runtime_tools
+                and message
+                and getattr(message, "tool_calls", None)
+                and finish_reason == "tool_calls"
+                and tool_handler
+            ):
+                iterations += 1
+                api_messages.append({
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": message.tool_calls
+                })
+
+                if tool_max_iterations is not None and iterations > max(tool_max_iterations, 0):
+                    api_messages.append({
+                        "role": "system",
+                        "content": "你已经达到允许的最大搜索次数，请停止继续调用搜索工具，根据现有信息完成回答。"
+                    })
+                    runtime_tool_choice = "none"
+                    continue
+
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    raw_arguments = tool_call.function.arguments or "{}"
+                    try:
+                        parsed_arguments = json.loads(raw_arguments)
+                    except json.JSONDecodeError:
+                        parsed_arguments = {"_raw": raw_arguments}
+
+                    try:
+                        tool_output = tool_handler(tool_name, parsed_arguments)
+                    except Exception as handler_exc:
+                        self.LOG.error(f"工具 {tool_name} 执行失败: {handler_exc}", exc_info=True)
+                        tool_output = json.dumps(
+                            {"error": f"{tool_name} failed: {handler_exc.__class__.__name__}"},
+                            ensure_ascii=False
+                        )
+
+                    if not isinstance(tool_output, str):
+                        tool_output = json.dumps(tool_output, ensure_ascii=False)
+
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_output
+                    })
+
+                runtime_tool_choice = None
+                continue
+
+            return message.content if message and message.content else ""
 
 
 if __name__ == "__main__":
