@@ -166,12 +166,13 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 "function": {
                     "name": "lookup_chat_history",
                     "description": (
-                        "Access older conversation history (excluding the most recent 30 messages). "
-                        "You can use three modes:\n"
-                        "1) keywords: provide `mode: \"keywords\"` with `keywords` (2-4 terms) or a `query` string, optional `context_window` (<=10) and `max_results` (<=20).\n"
-                        "2) range: provide `mode: \"range\"` with `start_offset` and `end_offset` (>30) to fetch a contiguous block counted from the latest message.\n"
-                        "3) time: provide `mode: \"time\"` with `start_time` and `end_time` (e.g., 2025-05-01 08:00[:00]) to fetch messages in that timeframe.\n"
-                        "Only supply the fields required for the chosen mode."
+                        "你目前只能看见最近的30条消息。"
+                        "如果需要查看历史记录消息，那么就请调用此函数。\n"
+                        "调用时必须明确指定 mode（keywords / range / time），并按照以下说明提供参数：\n"
+                        "1. mode=\"keywords\"：用于关键词模糊检索。请提供 `keywords` 数组（2-4 个核心词或短语），系统会自动按最新匹配段落返回，返回值中 `segments` 列表包含格式化的 \"时间 昵称 内容\" 行。\n"
+                        "2. mode=\"range\"：用于获取倒数的连续消息块。请提供 `start_offset` 与 `end_offset`（均需 >30，且 end_offset ≥ start_offset）。偏移基于最新消息的倒数编号，例如 31~120 表示排除当前可见的 30 条后，再向前取 90 条。\n"
+                        "3. mode=\"time\"：用于固定时间区间检索。请提供 `start_time`、`end_time`（格式如 2025-05-01 08:00 或 2025-05-01 08:00:00），将返回该时间范围内的所有消息。若区间不符合用户需求，可再次调用调整时间。\n"
+                        "函数随时可以多次调用并组合使用：例如先用 keywords 找锚点，再用 range/time 取更大上下文。"
                     ),
                     "parameters": {
                         "type": "object",
