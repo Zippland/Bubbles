@@ -27,7 +27,19 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         return False
     
     # 获取特定的历史消息数量限制
-    specific_max_history = getattr(ctx, 'specific_max_history', None)
+    raw_specific_max_history = getattr(ctx, 'specific_max_history', None)
+    specific_max_history = None
+    if raw_specific_max_history is not None:
+        try:
+            specific_max_history = int(raw_specific_max_history)
+        except (TypeError, ValueError):
+            specific_max_history = None
+        if specific_max_history is not None:
+            if specific_max_history < 10:
+                specific_max_history = 10
+            elif specific_max_history > 300:
+                specific_max_history = 300
+            setattr(ctx, 'specific_max_history', specific_max_history)
     if ctx.logger and specific_max_history is not None:
         ctx.logger.debug(f"为 {ctx.get_receiver()} 使用特定历史限制: {specific_max_history}")
     
