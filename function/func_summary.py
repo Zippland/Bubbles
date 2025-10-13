@@ -2,6 +2,7 @@
 
 import logging
 import time
+import datetime
 import re
 from collections import deque
 # from threading import Lock  # 不再需要锁，使用SQLite的事务机制
@@ -608,3 +609,90 @@ class MessageSummary:
         self.LOG.debug(f"记录消息 (来源: {source_info}, 类型: {'群聊' if msg.from_group() else '私聊'}): '[{current_time_str}]{sender_name}({sender_wxid}): {content_to_record}' (来自 msg.id={msg.id})")
         # 调用 record_message 时传入 sender_wxid
         self.record_message(chat_id, sender_name, sender_wxid, content_to_record, current_time_str)
+    @staticmethod
+    def _parse_datetime(dt_value):
+        """解析多种常见时间格式"""
+        if isinstance(dt_value, datetime.datetime):
+            return dt_value
+        if not dt_value:
+            return None
+
+        candidates = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M"
+        ]
+        dt_str = str(dt_value).strip()
+        for fmt in candidates:
+            try:
+                return datetime.datetime.strptime(dt_str, fmt)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def get_messages_by_time_window(
+        self,
+        chat_id,
+        start_time,
+        end_time,
+        exclude_recent=30,
+        max_messages=500
+    ):
+        """根据时间窗口获取消息
+
+        Args:
+            chat_id (str): 聊天ID
+            start_time (Union[str, datetime]): 起始时间
+            end_time (Union[str, datetime]): 结束时间
+            exclude_recent (int): 跳过最新的消息数量
+            max_messages (int): 返回的最大消息数
+
+        Returns:
+            list[str]: 已格式化的消息行
+        """
+        start_dt = self._parse_datetime(start_time)
+        end_dt = self._parse_datetime(end_time)
+        if not start_dt or not end_dt:
+            return []
+
+        try:
+            max_messages = int(max_messages)
+        except (TypeError, ValueError):
+            max_messages = 500
+        max_messages = max(1, min(max_messages, 500))
+
+        messages = self.get_messages(chat_id)
+        if not messages:
+            return []
+
+        total_messages = len(messages)
+        cutoff_index = total_messages - max(exclude_recent, 0)
+        if cutoff_index <= 0:
+            return []
+
+        collected = []
+        # 确保 start <= end
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+
+        for idx in range(cutoff_index - 1, -1, -1):
+            msg = messages[idx]
+            content = msg.get("content")
+            if self._is_internal_tool_message(content):
+                continue
+
+            time_str = msg.get("time")
+            dt = self._parse_datetime(time_str)
+            if not dt:
+                continue
+
+            if start_dt <= dt <= end_dt:
+                collected.append(f"{time_str} {msg.get('sender')} {content}")
+                if len(collected) >= max_messages:
+                    break
+
+        collected.reverse()
+        return collected

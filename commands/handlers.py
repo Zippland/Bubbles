@@ -229,6 +229,34 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 }
             }
 
+            time_window_tool = {
+                "type": "function",
+                "function": {
+                    "name": "fetch_chat_history_time_window",
+                    "description": (
+                        "Fetch historical messages that occurred between two timestamps. "
+                        "Provide precise start_time and end_time (e.g., 2025-05-01 08:00:00). "
+                        "If start_time is later than end_time they will be swapped. "
+                        "Only messages beyond the most recent 30 items are considered."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "start_time": {
+                                "type": "string",
+                                "description": "Start timestamp (supports formats like YYYY-MM-DD HH:MM[:SS])."
+                            },
+                            "end_time": {
+                                "type": "string",
+                                "description": "End timestamp (supports formats like YYYY-MM-DD HH:MM[:SS])."
+                            }
+                        },
+                        "required": ["start_time", "end_time"],
+                        "additionalProperties": False
+                    }
+                }
+            }
+
             def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
                 try:
                     if tool_name == "search_chat_history":
@@ -369,6 +397,43 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
 
                         return json.dumps(response_payload, ensure_ascii=False)
 
+                    elif tool_name == "fetch_chat_history_time_window":
+                        if "start_time" not in arguments or "end_time" not in arguments:
+                            return json.dumps({"error": "start_time and end_time are required."}, ensure_ascii=False)
+
+                        start_time = arguments.get("start_time")
+                        end_time = arguments.get("end_time")
+
+                        print(f"[fetch_chat_history_time_window] chat_id={chat_id}, start_time={start_time}, end_time={end_time}")
+                        if ctx.logger:
+                            ctx.logger.info(
+                                f"[fetch_chat_history_time_window] start_time={start_time}, end_time={end_time}"
+                            )
+
+                        time_lines = message_summary.get_messages_by_time_window(
+                            chat_id=chat_id,
+                            start_time=start_time,
+                            end_time=end_time
+                        )
+
+                        response_payload = {
+                            "start_time": start_time,
+                            "end_time": end_time,
+                            "messages": time_lines,
+                            "returned_count": len(time_lines)
+                        }
+
+                        print(f"[fetch_chat_history_time_window] returned_count={response_payload['returned_count']}")
+                        if ctx.logger:
+                            ctx.logger.info(
+                                f"[fetch_chat_history_time_window] returned_count={response_payload['returned_count']}"
+                            )
+
+                        if response_payload["returned_count"] == 0:
+                            response_payload["notice"] = "No messages found within the requested time window."
+
+                        return json.dumps(response_payload, ensure_ascii=False)
+
                     else:
                         return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
 
@@ -380,7 +445,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         ensure_ascii=False
                     )
 
-            tools = [search_history_tool, range_history_tool]
+            tools = [search_history_tool, range_history_tool, time_window_tool]
             tool_handler = handle_tool_call
 
         rsp = chat_model.get_answer(
