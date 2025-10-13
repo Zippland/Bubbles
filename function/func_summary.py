@@ -681,7 +681,7 @@ class MessageSummary:
         for idx in range(cutoff_index - 1, -1, -1):
             msg = messages[idx]
             content = msg.get("content")
-            if self._is_internal_tool_message(content):
+            if _is_internal_tool_message(content):
                 continue
 
             time_str = msg.get("time")
