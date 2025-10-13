@@ -226,10 +226,14 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                             inferred_mode = "time"
                         elif start_offset is not None and end_offset is not None:
                             inferred_mode = "range"
-                        elif keywords or arguments.get("query"):
+                        elif keywords:
                             inferred_mode = "keywords"
                         else:
                             inferred_mode = "keywords"
+
+                    print(f"[lookup_chat_history] inferred_mode={inferred_mode}, raw_args={arguments}")
+                    if ctx.logger:
+                        ctx.logger.info(f"[lookup_chat_history] inferred_mode={inferred_mode}, raw_args={arguments}")
 
                     if inferred_mode == "keywords":
                         keywords = arguments.get("keywords", [])
