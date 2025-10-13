@@ -44,7 +44,7 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
 
 用户输入 -> AI 路由决策 -> 满足功能要求 -> agent格式化输出 -> 格式解析 -> 函数调用 -> 接口访问 -> 查询数据 -> 数据库持久化 -> 结果回调
 
-<img src="img_3.png" width="400"/> 
+<img src="img_1.jpg" width="250"/> <img src="img_2.jpg" width="250"/> <img src="img_3.png" width="250"/> <img src="img_4.png" width="250"/>
 
 ## ✨ 核心特性
 
