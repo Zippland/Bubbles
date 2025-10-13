@@ -13,6 +13,19 @@ from function.func_xml_process import XmlProcessor  # 导入XmlProcessor
 MAX_DB_HISTORY_LIMIT = 10000
 
 
+def _is_internal_tool_message(content: str) -> bool:
+    """判断是否为内部工具日志消息，避免被当作正常聊天记录返回"""
+    if not content:
+        return False
+    markers = (
+        "[search_chat_history]",
+        "[fetch_chat_history_range]",
+        "[fetch_chat_history_time_window]",
+        "[History tool failed",
+    )
+    return any(marker in content for marker in markers)
+
+
 class MessageSummary:
     """消息总结功能类 (使用SQLite持久化)
     用于记录、管理和生成聊天历史消息的总结
