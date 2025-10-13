@@ -166,8 +166,8 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 "function": {
                     "name": "lookup_chat_history",
                     "description": (
-                        "你目前只能看见最近的30条消息。"
-                        "如果需要查看历史记录消息，那么就请调用此函数。\n"
+                        "你目前只能看见最近的30条消息，所以不一定能了解事件全貌。"
+                        "我们鼓励你通过查看历史记录来了解事情的全貌：如果需要查看历史记录消息，那么就请调用此函数。\n"
                         "调用时必须明确指定 mode（keywords / range / time），并按照以下说明提供参数：\n"
                         "1. mode=\"keywords\"：用于关键词模糊检索。请提供 `keywords` 数组（2-4 个核心词或短语），系统会自动按最新匹配段落返回，返回值中 `segments` 列表包含格式化的 \"时间 昵称 内容\" 行。\n"
                         "2. mode=\"range\"：用于获取倒数的连续消息块。请提供 `start_offset` 与 `end_offset`（均需 >30，且 end_offset ≥ start_offset）。偏移基于最新消息的倒数编号，例如 31~120 表示排除当前可见的 30 条后，再向前取 90 条。\n"
