@@ -39,9 +39,11 @@ Bubbles 是一个功能丰富的微信机器人框架，基于 [wcferry](https:/
 
 ## 🔩 更新日志
 
-- 2025-10-13 支持 Agentic Retrival 能力
+- 2025-10-13 赋予泡泡 Agentic Retrival 的能力
 - 2025-09-25 支持完全的 Agentic Routing 驱动，无需用户感知
+- 2025-09-18 支持通过 “想想” 触发深度思考，且 DeepResearch 能动态改变思考深度
 - 2025-05-12 新增提醒、日程管理功能
+- 2025-05-01 支持 DeepResearch
 - 之前的就先不记录了
 
 ## 案例演示
