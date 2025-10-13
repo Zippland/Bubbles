@@ -161,97 +161,48 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             chat_id = ctx.get_receiver()
             message_summary = ctx.robot.message_summary
 
-            search_history_tool = {
+            history_lookup_tool = {
                 "type": "function",
                 "function": {
-                    "name": "search_chat_history",
+                    "name": "lookup_chat_history",
                     "description": (
-                        "Search older conversation history (excluding the most recent 30 messages) using multiple related keywords. "
-                        "Provide 2-4 diverse keywords or short phrases that capture the user's intent; synonyms and key names greatly improve recall. "
-                        "The tool returns up to 20 recent segments, each containing deduplicated context lines that have already been formatted."
+                        "Access older conversation history (excluding the most recent 30 messages). "
+                        "You can use three modes:\n"
+                        "1) keywords: provide `mode: \"keywords\"` with `keywords` (2-4 terms) or a `query` string, optional `context_window` (<=10) and `max_results` (<=20).\n"
+                        "2) range: provide `mode: \"range\"` with `start_offset` and `end_offset` (>30) to fetch a contiguous block counted from the latest message.\n"
+                        "3) time: provide `mode: \"time\"` with `start_time` and `end_time` (e.g., 2025-05-01 08:00[:00]) to fetch messages in that timeframe.\n"
+                        "Only supply the fields required for the chosen mode."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
+                            "mode": {
+                                "type": "string",
+                                "description": "One of keywords, range, time.",
+                                "enum": ["keywords", "range", "time"]
+                            },
                             "keywords": {
                                 "type": "array",
-                                "description": "Diverse keywords or short phrases (2-4 recommended) for fuzzy searching message content.",
-                                "items": {"type": "string"},
-                                "minItems": 1
+                                "description": "Keywords for fuzzy search when mode=keywords.",
+                                "items": {"type": "string"}
                             },
-                            "query": {
-                                "type": "string",
-                                "description": "Optional free-form string; will be split into keywords by whitespace."
-                            },
-                            "context_window": {
-                                "type": "integer",
-                                "description": "How many messages before and after each match to include (default 5, max 10).",
-                                "minimum": 0,
-                                "maximum": 10
-                            },
-                            "max_results": {
-                                "type": "integer",
-                                "description": "Maximum number of result segments to return (default 20).",
-                                "minimum": 1,
-                                "maximum": 20
-                            }
-                        },
-                        "additionalProperties": False
-                    }
-                }
-            }
-
-            range_history_tool = {
-                "type": "function",
-                "function": {
-                    "name": "fetch_chat_history_range",
-                    "description": (
-                        "Retrieve a slice of older conversation by specifying two offsets counted from the latest message "
-                        "(e.g., start_offset=60, end_offset=120 fetches messages between the 60th and 120th most recent). "
-                        "Both offsets must be greater than 30 so that only unseen history is retrieved. "
-                        "Use when you need a contiguous block of messages instead of keyword search."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
                             "start_offset": {
                                 "type": "integer",
-                                "description": "Smaller offset counted from the latest message (must be >30)."
+                                "description": "Smaller offset counted from the latest message (>30) when mode=range."
                             },
                             "end_offset": {
                                 "type": "integer",
-                                "description": "Larger offset counted from the latest message (must be > start_offset and >30)."
-                            }
-                        },
-                        "required": ["start_offset", "end_offset"],
-                        "additionalProperties": False
-                    }
-                }
-            }
-
-            time_window_tool = {
-                "type": "function",
-                "function": {
-                    "name": "fetch_chat_history_time_window",
-                    "description": (
-                        "Fetch historical messages that occurred between two timestamps. "
-                        "Provide precise start_time and end_time (e.g., 2025-05-01 08:00:00). "
-                        "If start_time is later than end_time they will be swapped. "
-                        "Only messages beyond the most recent 30 items are considered."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
+                                "description": "Larger offset counted from the latest message (>30) when mode=range."
+                            },
                             "start_time": {
                                 "type": "string",
-                                "description": "Start timestamp (supports formats like YYYY-MM-DD HH:MM[:SS])."
+                                "description": "Start timestamp when mode=time (e.g., 2025-05-01 08:00[:00])."
                             },
                             "end_time": {
                                 "type": "string",
-                                "description": "End timestamp (supports formats like YYYY-MM-DD HH:MM[:SS])."
+                                "description": "End timestamp when mode=time (e.g., 2025-05-01 12:00[:00])."
                             }
                         },
-                        "required": ["start_time", "end_time"],
                         "additionalProperties": False
                     }
                 }
@@ -259,21 +210,33 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
 
             def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
                 try:
-                    if tool_name == "search_chat_history":
+                    if tool_name != "lookup_chat_history":
+                        return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
+
+                    mode = (arguments.get("mode") or "").strip().lower()
+                    keywords = arguments.get("keywords")
+                    start_offset = arguments.get("start_offset")
+                    end_offset = arguments.get("end_offset")
+                    start_time = arguments.get("start_time")
+                    end_time = arguments.get("end_time")
+
+                    inferred_mode = mode
+                    if not inferred_mode:
+                        if start_time and end_time:
+                            inferred_mode = "time"
+                        elif start_offset is not None and end_offset is not None:
+                            inferred_mode = "range"
+                        elif keywords or arguments.get("query"):
+                            inferred_mode = "keywords"
+                        else:
+                            inferred_mode = "keywords"
+
+                    if inferred_mode == "keywords":
                         keywords = arguments.get("keywords", [])
                         if isinstance(keywords, str):
                             keywords = [keywords]
                         elif not isinstance(keywords, list):
                             keywords = []
-
-                        query = arguments.get("query")
-                        if isinstance(query, str) and query.strip():
-                            query_keywords = [
-                                segment
-                                for segment in re.split(r"[,\s，。；;]+", query.strip())
-                                if segment
-                            ]
-                            keywords.extend(query_keywords)
 
                         cleaned_keywords = []
                         for kw in keywords:
@@ -297,8 +260,8 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         if not deduped_keywords:
                             return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
 
-                        context_window = arguments.get("context_window", 5)
-                        max_results = arguments.get("max_results", 20)
+                        context_window = 5
+                        max_results = 20
 
                         print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
                               f"context_window={context_window}, max_results={max_results}")
@@ -345,12 +308,9 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
 
                         return json.dumps(response_payload, ensure_ascii=False)
 
-                    elif tool_name == "fetch_chat_history_range":
-                        if "start_offset" not in arguments or "end_offset" not in arguments:
+                    elif inferred_mode == "range":
+                        if start_offset is None or end_offset is None:
                             return json.dumps({"error": "start_offset and end_offset are required."}, ensure_ascii=False)
-
-                        start_offset = arguments.get("start_offset")
-                        end_offset = arguments.get("end_offset")
 
                         try:
                             start_offset = int(start_offset)
@@ -397,12 +357,9 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
 
                         return json.dumps(response_payload, ensure_ascii=False)
 
-                    elif tool_name == "fetch_chat_history_time_window":
-                        if "start_time" not in arguments or "end_time" not in arguments:
+                    elif inferred_mode == "time":
+                        if not start_time or not end_time:
                             return json.dumps({"error": "start_time and end_time are required."}, ensure_ascii=False)
-
-                        start_time = arguments.get("start_time")
-                        end_time = arguments.get("end_time")
 
                         print(f"[fetch_chat_history_time_window] chat_id={chat_id}, start_time={start_time}, end_time={end_time}")
                         if ctx.logger:
@@ -435,7 +392,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         return json.dumps(response_payload, ensure_ascii=False)
 
                     else:
-                        return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
+                        return json.dumps({"error": f"Unsupported mode '{inferred_mode}'"}, ensure_ascii=False)
 
                 except Exception as tool_exc:
                     if ctx.logger:
@@ -445,7 +402,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         ensure_ascii=False
                     )
 
-            tools = [search_history_tool, range_history_tool, time_window_tool]
+            tools = [history_lookup_tool]
             tool_handler = handle_tool_call
 
         rsp = chat_model.get_answer(
