@@ -9,12 +9,15 @@ import sqlite3  # 添加sqlite3模块
 import os  # 用于处理文件路径
 from function.func_xml_process import XmlProcessor  # 导入XmlProcessor
 
+MAX_DB_HISTORY_LIMIT = 10000
+
+
 class MessageSummary:
     """消息总结功能类 (使用SQLite持久化)
     用于记录、管理和生成聊天历史消息的总结
     """
 
-    def __init__(self, max_history=200, db_path="data/message_history.db"): # 默认max_history 改为 200
+    def __init__(self, max_history=MAX_DB_HISTORY_LIMIT, db_path="data/message_history.db"):
         """初始化消息总结功能
 
         Args:
@@ -22,7 +25,21 @@ class MessageSummary:
             db_path: SQLite数据库文件路径
         """
         self.LOG = logging.getLogger("MessageSummary")
-        self.max_history = max_history # 使用传入的 max_history
+        try:
+            parsed_history_limit = int(max_history)
+        except (TypeError, ValueError):
+            parsed_history_limit = MAX_DB_HISTORY_LIMIT
+
+        if parsed_history_limit <= 0:
+            parsed_history_limit = MAX_DB_HISTORY_LIMIT
+
+        if parsed_history_limit > MAX_DB_HISTORY_LIMIT:
+            self.LOG.warning(
+                f"传入的 max_history={parsed_history_limit} 超过上限，将截断为 {MAX_DB_HISTORY_LIMIT}"
+            )
+            parsed_history_limit = MAX_DB_HISTORY_LIMIT
+
+        self.max_history = parsed_history_limit
         self.db_path = db_path
 
         # 实例化XML处理器用于提取引用消息

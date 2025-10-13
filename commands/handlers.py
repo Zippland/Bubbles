@@ -241,6 +241,14 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                     context_window = arguments.get("context_window", 5)
                     max_results = arguments.get("max_results", 20)
 
+                    print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
+                          f"context_window={context_window}, max_results={max_results}")
+                    if ctx.logger:
+                        ctx.logger.info(
+                            f"[search_chat_history] keywords={deduped_keywords}, "
+                            f"context_window={context_window}, max_results={max_results}"
+                        )
+
                     search_results = message_summary.search_messages_with_context(
                         chat_id=chat_id,
                         keywords=deduped_keywords,
@@ -253,6 +261,10 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         "returned_groups": len(search_results),
                         "keywords": deduped_keywords
                     }
+
+                    print(f"[search_chat_history] returned_groups={len(search_results)}")
+                    if ctx.logger:
+                        ctx.logger.info(f"[search_chat_history] returned_groups={len(search_results)}")
 
                     if not search_results:
                         response_payload["notice"] = "No messages matched the provided keywords."
