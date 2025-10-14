@@ -22,6 +22,8 @@ class MessageContext:
     is_group: bool = False     # 是否群聊消息
     is_at_bot: bool = False    # 是否在群聊中 @ 了机器人
     sender_name: str = "未知用户" # 发送者昵称 (群内或私聊)
+    reasoning_requested: bool = False  # 是否请求启用推理模式
+    router_decision: Optional[Dict[str, Any]] = None  # AI路由返回的决策结果
     
     # 懒加载字段
     _room_members: Optional[Dict[str, str]] = field(default=None, init=False, repr=False)

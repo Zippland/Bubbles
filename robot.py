@@ -262,34 +262,15 @@ class Robot(Job):
             # 确保context能访问到当前选定的chat模型及特定历史限制
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
-            
-            reasoning_triggered = bool(
+            ctx.reasoning_requested = bool(
                 ctx.text
                 and "想想" in ctx.text
                 and (not ctx.is_group or ctx.is_at_bot)
             )
-            if reasoning_triggered:
-                self.LOG.info("检测到推理模式触发词，跳过AI路由。")
-                ctx.send_text("正在深度思考，请稍候...", record_message=False)
 
-                previous_ctx_chat = ctx.chat
-                reasoning_chat = self._get_reasoning_chat_model()
-                if reasoning_chat:
-                    ctx.chat = reasoning_chat
-                    model_label = self._describe_chat_model(reasoning_chat, reasoning=True)
-                    self.LOG.debug(f"使用推理模型 {model_label} 处理消息")
-                else:
-                    self.LOG.warning("当前模型未配置推理模型，使用默认模型处理深度思考请求")
-
-                reasoning_handled = False
-                try:
-                    reasoning_handled = handle_chitchat(ctx, None)
-                finally:
-                    ctx.chat = previous_ctx_chat
-
-                if not reasoning_handled:
-                    self.LOG.warning("推理模式处理消息失败，向用户返回降级提示")
-                    ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
+            if ctx.reasoning_requested:
+                self.LOG.info("检测到推理模式触发词，跳过AI路由，直接进入闲聊推理模式。")
+                self._handle_chitchat(ctx, None)
                 return
 
             handled = False
@@ -299,6 +280,17 @@ class Robot(Job):
                 self.LOG.debug(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
                 handled = ai_router.dispatch(ctx)
                 self.LOG.debug(f"[AI路由调试] AI路由器处理结果: {handled}")
+                router_decision = getattr(ctx, 'router_decision', None)
+                if router_decision:
+                    action_type = router_decision.get("action_type")
+                    if action_type == "chat":
+                        if router_decision.get("enable_reasoning"):
+                            self.LOG.info("AI路由器请求启用推理模式处理聊天消息")
+                        ctx.reasoning_requested = ctx.reasoning_requested or bool(router_decision.get("enable_reasoning"))
+                    else:
+                        if ctx.reasoning_requested:
+                            self.LOG.debug("AI路由器选择了非聊天模式，关闭推理模式")
+                        ctx.reasoning_requested = False
                 if handled:
                     self.LOG.info("消息已由AI路由器处理")
                     self.LOG.debug("[AI路由调试] 消息已成功由AI路由器处理")
@@ -340,7 +332,7 @@ class Robot(Job):
                     # 如果在群里被@了，但AI路由器未处理，则进行闲聊
                     if msg.is_at(self.wxid):
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
+                        self._handle_chitchat(ctx, None)
                     else:
                         pass
                         
@@ -350,7 +342,7 @@ class Robot(Job):
                     if msg.type == 1 or (msg.type == 49 and ctx.text):
                         self.LOG.info(f"准备回复私聊消息: 类型={msg.type}, 文本内容='{ctx.text}'")
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        handle_chitchat(ctx, None)
+                        self._handle_chitchat(ctx, None)
                     
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)
@@ -554,6 +546,36 @@ class Robot(Job):
         if model_id is None:
             return None
         return self.reasoning_chat_models.get(model_id)
+
+    def _handle_chitchat(self, ctx, match=None):
+        """统一处理闲聊，自动切换推理模型"""
+        reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False))
+        previous_ctx_chat = getattr(ctx, 'chat', None)
+        reasoning_chat = None
+
+        if reasoning_requested:
+            self.LOG.info("检测到推理模式请求，将启用深度思考。")
+            ctx.send_text("正在深度思考，请稍候...", record_message=False)
+            reasoning_chat = self._get_reasoning_chat_model()
+            if reasoning_chat:
+                ctx.chat = reasoning_chat
+                model_label = self._describe_chat_model(reasoning_chat, reasoning=True)
+                self.LOG.debug(f"使用推理模型 {model_label} 处理消息")
+            else:
+                self.LOG.warning("当前模型未配置推理模型，使用默认模型处理深度思考请求")
+
+        handled = False
+        try:
+            handled = handle_chitchat(ctx, match)
+        finally:
+            if reasoning_chat and previous_ctx_chat is not None:
+                ctx.chat = previous_ctx_chat
+
+        if reasoning_requested and not handled:
+            self.LOG.warning("推理模式处理消息失败，向用户返回降级提示")
+            ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
+
+        return handled
 
     def _describe_chat_model(self, chat_model, reasoning: bool = False) -> str:
         """根据配置返回模型名称，默认回退到实例类名"""

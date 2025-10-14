@@ -87,6 +87,11 @@ class AIRouter:
         {
             "action_type": "chat"
         }
+3        另外，请判断该问题需不需要被认真对待，如果是比较严肃的问题，需要被认真对待，那么请通过参数配置开启深度思考，需要额外提供：
+        {
+            "action_type": "chat",
+            "enable_reasoning": true
+        }
         
         2.如果用户需要使用上述功能之一，返回：
         {
@@ -99,6 +104,7 @@ class AIRouter:
         - 用户输入"提醒我下午3点开会" -> {"action_type": "function", "function_name": "reminder_set", "params": "下午3点开会"}
         - 用户输入"查看我的提醒" -> {"action_type": "function", "function_name": "reminder_list", "params": ""}
         - 用户输入"你好" -> {"action_type": "chat"}
+        - 用户输入"帮我认真想想这道题" -> {"action_type": "chat", "enable_reasoning": true}
         - 用户输入"查一下Python教程" -> {"action_type": "function", "function_name": "perplexity_search", "params": "Python教程"}
 
         #### 格式注意事项：
@@ -169,6 +175,14 @@ class AIRouter:
                 if function_name not in self.functions:
                     self.logger.warning(f"AI路由器：未知的功能名 - {function_name}")
                     return False, None
+            else:
+                # 聊天模式下检查是否请求推理
+                if "enable_reasoning" in decision:
+                    raw_value = decision.get("enable_reasoning")
+                    if isinstance(raw_value, str):
+                        decision["enable_reasoning"] = raw_value.strip().lower() in ("true", "1", "yes", "y")
+                    else:
+                        decision["enable_reasoning"] = bool(raw_value)
             
             self.logger.info(f"AI路由决策: {decision}")
             return True, decision
@@ -223,6 +237,7 @@ class AIRouter:
         
         # 获取AI路由决策
         success, decision = self.route(ctx)
+        ctx.router_decision = decision if success else None
         self.logger.debug(f"[AI路由器] route返回 - success: {success}, decision: {decision}")
         
         if not success or not decision:
