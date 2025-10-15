@@ -234,7 +234,8 @@ class PerplexityManager:
             wait_msg = "正在启用满血模式研究中...." if full_research_available else "正在联网查询，请稍候..."
             if enable_full_research and not full_research_available:
                 self.LOG.warning("收到满血模式请求，但未配置推理模型，退回普通模式。")
-            send_text_func(wait_msg, at_list=at_user or "", record_message=False)
+            # 等待提示无需 @ 用户，避免频繁打扰
+            send_text_func(wait_msg, at_list="", record_message=False)
             
             # 添加线程完成回调，自动清理线程
             def thread_finished_callback():

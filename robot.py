@@ -382,8 +382,10 @@ class Robot(Job):
                 return
             self._msg_timestamps.append(now)
 
+        # 去除 Markdown 粗体标记，避免微信端出现多余符号
+        msg = msg.replace("**", "")
         ats = ""
-        message_to_send = msg # 保存原始消息用于记录
+        message_to_send = msg # 保存清理后的消息用于记录
         if at_list:
             if at_list == "notify@all":
                 ats = " @所有人"
