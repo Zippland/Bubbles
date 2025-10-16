@@ -5,68 +5,69 @@ AI路由功能注册
 from .ai_router import ai_router
 from .context import MessageContext
 
-# ======== 提醒功能 ========
+# ======== 提醒功能（一级交给二级路由） ========
 @ai_router.register(
-    name="reminder_set",
-    description="设置提醒",
-    examples=["提醒我明天下午3点开会", "每天早上8点提醒我吃早餐"],
-    params_description="时间和内容"
+    name="reminder_hub",
+    description="处理提醒相关需求，会进一步判断是创建、查看还是删除提醒，并自动执行。",
+    examples=[
+        "提醒我明天上午十点开会",
+        "看看今天有哪些提醒",
+        "删除下午三点的提醒"
+    ],
+    params_description="原始提醒类请求内容"
 )
-def ai_handle_reminder_set(ctx: MessageContext, params: str) -> bool:
-    """AI路由的提醒设置处理"""
-    if not params.strip():
+def ai_handle_reminder_hub(ctx: MessageContext, params: str) -> bool:
+    from .reminder_router import reminder_router
+    from .handlers import handle_reminder, handle_list_reminders, handle_delete_reminder
+
+    original_text = params.strip() if isinstance(params, str) and params.strip() else ctx.text or ""
+    decision = reminder_router.route(ctx, original_text)
+
+    if not decision:
         at_list = ctx.msg.sender if ctx.is_group else ""
-        ctx.send_text("请告诉我需要提醒什么内容和时间呀~", at_list)
+        ctx.send_text("抱歉，暂时无法理解提醒请求，可以换一种说法吗？", at_list)
         return True
-    
-    # 调用原有的提醒处理逻辑
-    from .handlers import handle_reminder
-    
-    # 临时修改消息内容以适配原有处理器
-    original_content = ctx.msg.content
-    ctx.msg.content = f"提醒我{params}"
-    
-    # handle_reminder不使用match参数，直接传None
-    result = handle_reminder(ctx, None)
-    
-    # 恢复原始内容
-    ctx.msg.content = original_content
-    
-    return result
 
-@ai_router.register(
-    name="reminder_list",
-    description="查看所有提醒",
-    examples=["查看我的提醒", "我有哪些提醒"],
-    params_description="无需参数"
-)
-def ai_handle_reminder_list(ctx: MessageContext, params: str) -> bool:
-    """AI路由的提醒列表查看处理"""
-    from .handlers import handle_list_reminders
-    return handle_list_reminders(ctx, None)
+    action = decision.action
 
-@ai_router.register(
-    name="reminder_delete",
-    description="删除提醒",
-    examples=["删除开会的提醒", "取消明天的提醒"],
-    params_description="提醒描述"
-)
-def ai_handle_reminder_delete(ctx: MessageContext, params: str) -> bool:
-    """AI路由的提醒删除处理"""
-    # 调用原有的删除提醒逻辑
-    from .handlers import handle_delete_reminder
-    
-    # 临时修改消息内容
-    original_content = ctx.msg.content
-    ctx.msg.content = f"删除提醒 {params}"
-    
-    # handle_delete_reminder不使用match参数，直接传None
-    result = handle_delete_reminder(ctx, None)
-    
-    # 恢复原始内容
-    ctx.msg.content = original_content
-    
-    return result
+    if action == "list":
+        return handle_list_reminders(ctx, None)
+
+    if action == "delete":
+        at_list = ctx.msg.sender if ctx.is_group else ""
+        if not decision.success:
+            ctx.send_text(decision.message or "❌ 抱歉，无法处理删除提醒的请求。", at_list)
+            return True
+
+        if decision.payload is not None:
+            setattr(ctx, "_reminder_delete_plan", decision.payload)
+
+        try:
+            return handle_delete_reminder(ctx, None)
+        finally:
+            if hasattr(ctx, "_reminder_delete_plan"):
+                delattr(ctx, "_reminder_delete_plan")
+
+    if action == "create":
+        at_list = ctx.msg.sender if ctx.is_group else ""
+        if not decision.success:
+            ctx.send_text(decision.message or "❌ 抱歉，暂时无法理解您的提醒请求。", at_list)
+            return True
+
+        if decision.payload is not None:
+            setattr(ctx, "_reminder_create_plan", decision.payload)
+
+        try:
+            return handle_reminder(ctx, None)
+        finally:
+            if hasattr(ctx, "_reminder_create_plan"):
+                delattr(ctx, "_reminder_create_plan")
+
+    # 兜底处理：无法识别的动作
+    at_list = ctx.msg.sender if ctx.is_group else ""
+    fallback_message = decision.message or "抱歉，暂时无法处理提醒请求，可以换一种说法吗？"
+    ctx.send_text(fallback_message, at_list)
+    return True
 
 # ======== Perplexity搜索功能 ========
 @ai_router.register(

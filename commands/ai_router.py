@@ -101,8 +101,8 @@ class AIRouter:
         }
 
         #### 示例：
-        - 用户输入"提醒我下午3点开会" -> {"action_type": "function", "function_name": "reminder_set", "params": "下午3点开会"}
-        - 用户输入"查看我的提醒" -> {"action_type": "function", "function_name": "reminder_list", "params": ""}
+        - 用户输入"提醒我下午3点开会" -> {"action_type": "function", "function_name": "reminder_hub", "params": "提醒我下午3点开会"}
+        - 用户输入"查看我的提醒" -> {"action_type": "function", "function_name": "reminder_hub", "params": "查看我的提醒"}
         - 用户输入"你好" -> {"action_type": "chat"}
         - 用户输入"帮我认真想想这道题" -> {"action_type": "chat", "enable_reasoning": true}
         - 用户输入"查一下Python教程" -> {"action_type": "function", "function_name": "perplexity_search", "params": "Python教程"}
