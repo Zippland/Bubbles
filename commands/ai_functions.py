@@ -29,45 +29,26 @@ def ai_handle_reminder_hub(ctx: MessageContext, params: str) -> bool:
         return True
 
     action = decision.action
+    payload = decision.params or original_text
 
     if action == "list":
         return handle_list_reminders(ctx, None)
 
     if action == "delete":
-        at_list = ctx.msg.sender if ctx.is_group else ""
-        if not decision.success:
-            ctx.send_text(decision.message or "❌ 抱歉，无法处理删除提醒的请求。", at_list)
-            return True
-
-        if decision.payload is not None:
-            setattr(ctx, "_reminder_delete_plan", decision.payload)
-
+        original_content = ctx.msg.content
+        ctx.msg.content = f"删除提醒 {payload}".strip()
         try:
             return handle_delete_reminder(ctx, None)
         finally:
-            if hasattr(ctx, "_reminder_delete_plan"):
-                delattr(ctx, "_reminder_delete_plan")
+            ctx.msg.content = original_content
 
-    if action == "create":
-        at_list = ctx.msg.sender if ctx.is_group else ""
-        if not decision.success:
-            ctx.send_text(decision.message or "❌ 抱歉，暂时无法理解您的提醒请求。", at_list)
-            return True
-
-        if decision.payload is not None:
-            setattr(ctx, "_reminder_create_plan", decision.payload)
-
-        try:
-            return handle_reminder(ctx, None)
-        finally:
-            if hasattr(ctx, "_reminder_create_plan"):
-                delattr(ctx, "_reminder_create_plan")
-
-    # 兜底处理：无法识别的动作
-    at_list = ctx.msg.sender if ctx.is_group else ""
-    fallback_message = decision.message or "抱歉，暂时无法处理提醒请求，可以换一种说法吗？"
-    ctx.send_text(fallback_message, at_list)
-    return True
+    # 默认视为创建提醒
+    original_content = ctx.msg.content
+    ctx.msg.content = payload if payload.startswith("提醒我") else f"提醒我{payload}"
+    try:
+        return handle_reminder(ctx, None)
+    finally:
+        ctx.msg.content = original_content
 
 # ======== Perplexity搜索功能 ========
 @ai_router.register(
