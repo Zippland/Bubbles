@@ -75,10 +75,6 @@ class AIRouter:
             prompt += "\n"
 
         prompt += """
-        对于 perplexity_search：只有当问题确实十分复杂、需要长时间联网深度研究时，才在 params 中加入 JSON 字段 "deep_research": true；否则保持默认以节省时间和费用。
-        """
-
-        prompt += """
         请你分析用户输入，严格按照以下格式返回JSON：
 
         ### 返回格式：
