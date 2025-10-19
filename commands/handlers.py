@@ -267,7 +267,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         if not deduped_keywords:
                             return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
 
-                        context_window = 5
+                        context_window = 10
                         max_results = 20
 
                         print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
