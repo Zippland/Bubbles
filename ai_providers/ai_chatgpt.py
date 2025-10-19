@@ -155,9 +155,9 @@ class ChatGPT():
         iterations = 0
         params_base = {"model": self.model}
 
-        # 只有非o系列模型才设置temperature
-        if not self.model.startswith("o"):
-            params_base["temperature"] = 0.2
+        # # 只有非o系列模型才设置temperature
+        # if not self.model.startswith("o"):
+        #     params_base["temperature"] = 0.2
 
         # 确保工具参数格式正确
         runtime_tools = tools if tools and isinstance(tools, list) else None
@@ -295,8 +295,8 @@ class ChatGPT():
                 "max_tokens": 1000
             }
 
-            if not self.model.startswith("o"):
-                params["temperature"] = 0.7
+            # if not self.model.startswith("o"):
+            #     params["temperature"] = 0.7
 
             response = self.client.chat.completions.create(**params)
             description = response.choices[0].message.content
