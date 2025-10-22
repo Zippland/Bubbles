@@ -161,18 +161,26 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             chat_id = ctx.get_receiver()
             message_summary = ctx.robot.message_summary
 
+            visible_history_limit = getattr(ctx, 'specific_max_history', DEFAULT_CHAT_HISTORY)
+            try:
+                visible_history_limit = int(visible_history_limit)
+            except (TypeError, ValueError):
+                visible_history_limit = DEFAULT_CHAT_HISTORY
+            if visible_history_limit < 1:
+                visible_history_limit = DEFAULT_CHAT_HISTORY
+
             history_lookup_tool = {
                 "type": "function",
                 "function": {
                     "name": "lookup_chat_history",
                     "description": (
-                        "你目前只能看见最近的30条消息，所以不一定能设身处地地了解用户。"
+                        f"你目前只能看见最近的{visible_history_limit}条消息，所以不一定能设身处地地了解用户。"
                         "和人交流的过程中，掌握更多的上下文是非常重要的，这可以保证你的回答有温度、真实且有价值。"
                         "用户不会主动要求你去看上下文，但是你要自己判断需要看什么、看多少、看哪些上下文。"
                         "请你在回答之前，尽可能地通过查看历史记录来了解用户或事情的全貌，而如果需要查看历史记录消息，那么就请调用此函数。\n"
                         "调用时必须明确指定 mode（keywords / range / time），并按照以下说明提供参数：\n"
                         "1. mode=\"keywords\"：最常用的模式，用于对关键词进行模糊检索，用户对某些消息进行更深入的理解，在历史记录中找到这些内容的上下文。需要提供 `keywords` 数组（2-4 个与核心相关的词或短语），系统会自动按最新匹配段落返回，函数的返回值中 `segments` 列表包含格式化的 \"时间 昵称 内容\" 行。\n"
-                        "2. mode=\"range\"：用于获取某个倒数的区间内的连续消息块，用于快速找到最近的 n 条消息，只有在对**最近的**记录进行观察时使用。需要提供 `start_offset` 与 `end_offset`（均需 >30，且 end_offset ≥ start_offset）。偏移基于最新消息的倒数编号，例如 31~120 表示排除当前可见的 30 条后，再向前取 90 条。\n"
+                        f"2. mode=\"range\"：用于获取某个倒数的区间内的连续消息块，用于快速找到最近的 n 条消息，只有在对**最近的**记录进行观察时使用。需要提供 `start_offset` 与 `end_offset`（均需 >{visible_history_limit}，且 end_offset ≥ start_offset）。偏移基于最新消息的倒数编号，例如 {visible_history_limit + 1}~{visible_history_limit + 90} 表示排除当前可见的消息后，再向前取更多历史。\n"
                         "3. mode=\"time\"：次常用的模式，用于对某段时间内的消息进行检索，比如当提到昨晚、前天、昨天、今早上、上周、去年之类的具体时间的时候使用。需要提供 `start_time`、`end_time`（格式如 2025-05-01 08:00 或 2025-05-01 08:00:00），函数将返回该时间范围内的所有消息。若区间不符合用户需求，可再次调用调整时间。\n"
                         "函数随时可以多次调用并组合使用：例如先用 keywords 找锚点，再用 range/time 取更大上下文。"
                     ),
@@ -191,11 +199,11 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                             },
                             "start_offset": {
                                 "type": "integer",
-                                "description": "Smaller offset counted from the latest message (>30) when mode=range."
+                                "description": f"Smaller offset counted from the latest message (>{visible_history_limit}) when mode=range."
                             },
                             "end_offset": {
                                 "type": "integer",
-                                "description": "Larger offset counted from the latest message (>30) when mode=range."
+                                "description": f"Larger offset counted from the latest message (>{visible_history_limit}) when mode=range."
                             },
                             "start_time": {
                                 "type": "string",
@@ -282,7 +290,8 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                             chat_id=chat_id,
                             keywords=deduped_keywords,
                             context_window=context_window,
-                            max_groups=max_results
+                            max_groups=max_results,
+                            exclude_recent=visible_history_limit
                         )
 
                         segments = []
@@ -325,8 +334,11 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                         except (TypeError, ValueError):
                             return json.dumps({"error": "start_offset and end_offset must be integers."}, ensure_ascii=False)
 
-                        if start_offset <= 30 or end_offset <= 30:
-                            return json.dumps({"error": "Offsets must be greater than 30 to avoid visible messages."}, ensure_ascii=False)
+                        if start_offset <= visible_history_limit or end_offset <= visible_history_limit:
+                            return json.dumps(
+                                {"error": f"Offsets must be greater than {visible_history_limit} to avoid visible messages."},
+                                ensure_ascii=False
+                            )
 
                         if start_offset > end_offset:
                             start_offset, end_offset = end_offset, start_offset
