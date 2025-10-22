@@ -693,17 +693,36 @@ def handle_reminder(ctx: 'MessageContext', match: Optional[Match]) -> bool:
                 validation_error = "提醒内容太短"
             else:
                 # 验证时间格式
-                try:
-                    if data["type"] == "once":
-                        dt = datetime.strptime(data["time"], "%Y-%m-%d %H:%M")
-                        if dt < datetime.now():
-                             validation_error = f"时间 ({data['time']}) 必须是未来的时间"
-                    elif data["type"] in ["daily", "weekly"]:
-                         datetime.strptime(data["time"], "%H:%M") # 仅校验格式
+                time_value = data.get("time", "")
+                if data["type"] == "once":
+                    parsed_dt = None
+                    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+                        try:
+                            parsed_dt = datetime.strptime(time_value, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if not parsed_dt:
+                        validation_error = f"时间格式错误 ({time_value})"
+                    elif parsed_dt < datetime.now():
+                        validation_error = f"时间 ({time_value}) 必须是未来的时间"
                     else:
-                         validation_error = f"不支持的提醒类型: {data.get('type')}"
-                except ValueError:
-                     validation_error = f"时间格式错误 ({data.get('time', '')})"
+                        # 统一存储格式为分钟精度，避免比较时出错
+                        data["time"] = parsed_dt.strftime("%Y-%m-%d %H:%M")
+                elif data["type"] in ["daily", "weekly"]:
+                    parsed_time = None
+                    for fmt in ("%H:%M", "%H:%M:%S"):
+                        try:
+                            parsed_time = datetime.strptime(time_value, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if not parsed_time:
+                        validation_error = f"时间格式错误 ({time_value})"
+                    else:
+                        data["time"] = parsed_time.strftime("%H:%M")
+                else:
+                    validation_error = f"不支持的提醒类型: {data.get('type')}"
 
                 # 验证周提醒 (如果类型是 weekly 且无验证错误)
                 if not validation_error and data["type"] == "weekly":

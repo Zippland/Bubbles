@@ -118,21 +118,47 @@ class ReminderManager:
 
         # 进一步校验时间格式 (根据类型)
         weekday_val = None # 初始化 weekday
-        try:
-            if data["type"] == "once":
-                # 尝试解析，确保格式正确，并且是未来的时间
-                trigger_dt = datetime.strptime(data["time"], "%Y-%m-%d %H:%M")
-                if trigger_dt <= datetime.now():
-                     return False, f"一次性提醒时间 ({data['time']}) 必须是未来的时间"
-            elif data["type"] == "daily":
-                datetime.strptime(data["time"], "%H:%M") # 只校验格式
-            elif data["type"] == "weekly":
-                datetime.strptime(data["time"], "%H:%M") # 校验时间格式
-                if "weekday" not in data or not isinstance(data["weekday"], int) or not (0 <= data["weekday"] <= 6):
-                    return False, "每周提醒必须提供有效的 weekday 字段 (0-6)"
-                weekday_val = data["weekday"] # 获取 weekday 值
-        except ValueError as e:
-             return False, f"时间格式错误 ({data['time']})，需要 'YYYY-MM-DD HH:MM' (once) 或 'HH:MM' (daily/weekly): {e}"
+        time_value = data.get("time", "")
+        if data["type"] == "once":
+            # 尝试解析，确保格式正确，并且是未来的时间
+            trigger_dt = None
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    trigger_dt = datetime.strptime(time_value, fmt)
+                    break
+                except ValueError:
+                    continue
+            if not trigger_dt:
+                return False, f"一次性提醒时间格式错误 ({time_value})，需要 'YYYY-MM-DD HH:MM' 或 'YYYY-MM-DD HH:MM:SS'"
+            if trigger_dt <= datetime.now():
+                return False, f"一次性提醒时间 ({time_value}) 必须是未来的时间"
+            # 统一保存为分钟精度
+            data["time"] = trigger_dt.strftime("%Y-%m-%d %H:%M")
+        elif data["type"] == "daily":
+            parsed_time = None
+            for fmt in ("%H:%M", "%H:%M:%S"):
+                try:
+                    parsed_time = datetime.strptime(time_value, fmt)
+                    break
+                except ValueError:
+                    continue
+            if not parsed_time:
+                return False, f"每日提醒时间格式错误 ({time_value})，需要 'HH:MM' 或 'HH:MM:SS'"
+            data["time"] = parsed_time.strftime("%H:%M")
+        elif data["type"] == "weekly":
+            parsed_time = None
+            for fmt in ("%H:%M", "%H:%M:%S"):
+                try:
+                    parsed_time = datetime.strptime(time_value, fmt)
+                    break
+                except ValueError:
+                    continue
+            if not parsed_time:
+                return False, f"每周提醒时间格式错误 ({time_value})，需要 'HH:MM' 或 'HH:MM:SS'"
+            data["time"] = parsed_time.strftime("%H:%M")
+            if "weekday" not in data or not isinstance(data["weekday"], int) or not (0 <= data["weekday"] <= 6):
+                return False, "每周提醒必须提供有效的 weekday 字段 (0-6)"
+            weekday_val = data["weekday"] # 获取 weekday 值
 
         # 准备插入数据库
         sql = """
