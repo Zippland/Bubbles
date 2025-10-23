@@ -62,9 +62,11 @@ groups:
       - room_id: example12345@chatroom
         model: 2  
         max_history: 30  # 回顾最近30条消息
+        random_chitchat_probability: 0.2  # 群聊随机闲聊概率（0-1），0 表示关闭
       - room_id: example12345@chatroom 
         model: 7  
         max_history: 30  # 回顾最近30条消息
+        random_chitchat_probability: 0.0  # 可单独覆盖默认概率
     # 私聊映射
     private_mapping:
       - wxid: filehelper

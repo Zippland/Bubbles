@@ -13,6 +13,21 @@ class Config(object):
     def __init__(self) -> None:
         self.reload()
 
+    @staticmethod
+    def _normalize_random_chitchat_probability(entry, fallback_probability=0.0):
+        if isinstance(entry, (int, float)):
+            probability = entry
+        elif isinstance(entry, dict):
+            probability = entry.get("probability", fallback_probability)
+        else:
+            probability = fallback_probability
+        try:
+            probability = float(probability)
+        except (TypeError, ValueError):
+            probability = fallback_probability
+        probability = max(0.0, min(1.0, probability))
+        return probability
+
     def _load_config(self) -> dict:
         pwd = os.path.dirname(os.path.abspath(__file__))
         try:
@@ -33,6 +48,42 @@ class Config(object):
         self.GROUPS = yconfig["groups"]["enable"]
         self.WELCOME_MSG = yconfig["groups"].get("welcome_msg", "欢迎 {new_member} 加入群聊！")
         self.GROUP_MODELS = yconfig["groups"].get("models", {"default": 0, "mapping": []})
+        legacy_random_conf = yconfig["groups"].get("random_chitchat", {})
+        legacy_default = self._normalize_random_chitchat_probability(
+            legacy_random_conf.get("default", 0.0) if isinstance(legacy_random_conf, dict) else 0.0,
+            fallback_probability=0.0,
+        )
+        legacy_mapping = {}
+        if isinstance(legacy_random_conf, dict):
+            for item in legacy_random_conf.get("mapping", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                room_id = item.get("room_id")
+                if not room_id:
+                    continue
+                legacy_mapping[room_id] = self._normalize_random_chitchat_probability(
+                    item,
+                    fallback_probability=legacy_default,
+                )
+
+        random_chitchat_mapping = {}
+        for item in self.GROUP_MODELS.get("mapping", []) or []:
+            if not isinstance(item, dict):
+                continue
+            room_id = item.get("room_id")
+            if not room_id:
+                continue
+            if "random_chitchat_probability" in item:
+                rate = self._normalize_random_chitchat_probability(
+                    item["random_chitchat_probability"],
+                    fallback_probability=legacy_default,
+                )
+                random_chitchat_mapping[room_id] = rate
+            elif room_id in legacy_mapping:
+                random_chitchat_mapping[room_id] = legacy_mapping[room_id]
+
+        self.GROUP_RANDOM_CHITCHAT_DEFAULT = legacy_default
+        self.GROUP_RANDOM_CHITCHAT = random_chitchat_mapping
         self.NEWS = yconfig["news"]["receivers"]
         self.CHATGPT = yconfig.get("chatgpt", {})
         self.DEEPSEEK = yconfig.get("deepseek", {})

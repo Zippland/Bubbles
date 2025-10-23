@@ -170,6 +170,22 @@ GROUP_MODELS:
       max_history: 50  # 回顾最近50条消息
 ```
 
+#### 群聊随机闲聊回复
+
+如果希望机器人在群聊中偶尔主动开聊，可在 `groups.models.mapping` 中为群添加 `random_chitchat_probability`：
+
+```yaml
+groups:
+  models:
+    mapping:
+      - room_id: "12345678@chatroom"
+        model: 2
+        max_history: 30
+        random_chitchat_probability: 0.3  # 0-1，0 表示关闭
+```
+
+未设置该字段的群默认关闭；写入 0 可以显式禁用。
+
 #### 功能开关
 
 您可以启用或禁用各种功能：

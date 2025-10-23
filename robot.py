@@ -52,7 +52,32 @@ class Robot(Job):
         self.wxid = self.wcf.get_self_wxid() # 获取机器人自己的wxid
         self.allContacts = self.getAllContacts()
         self._msg_timestamps = []
-        self.group_random_reply_rate = 0.3
+        default_random_prob = getattr(self.config, "GROUP_RANDOM_CHITCHAT_DEFAULT", 0.0)
+        try:
+            self.group_random_reply_default = float(default_random_prob)
+        except (TypeError, ValueError):
+            self.group_random_reply_default = 0.0
+        self.group_random_reply_default = max(0.0, min(1.0, self.group_random_reply_default))
+
+        mapping_random_prob = getattr(self.config, "GROUP_RANDOM_CHITCHAT", {})
+        self.group_random_reply_mapping = {}
+        if isinstance(mapping_random_prob, dict):
+            for room_id, rate in mapping_random_prob.items():
+                try:
+                    numeric_rate = float(rate)
+                except (TypeError, ValueError):
+                    numeric_rate = self.group_random_reply_default
+                numeric_rate = max(0.0, min(1.0, numeric_rate))
+                self.group_random_reply_mapping[room_id] = numeric_rate
+
+        if self.group_random_reply_default > 0:
+            self.LOG.info(
+                f"群聊随机闲聊默认开启，概率={self.group_random_reply_default}"
+            )
+        for room_id, rate in self.group_random_reply_mapping.items():
+            self.LOG.info(
+                f"群聊随机闲聊设置: 群={room_id}, 概率={rate}"
+            )
 
         try:
              db_path = "data/message_history.db"
@@ -335,18 +360,20 @@ class Robot(Job):
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
                         self._handle_chitchat(ctx, None)
                     else:
-                        can_auto_reply = (
-                            not msg.from_self()
-                            and ctx.text
-                            and (msg.type == 1 or (msg.type == 49 and ctx.text))
-                        )
-                        if can_auto_reply:
-                            rand_val = random.random()
-                            if rand_val < self.group_random_reply_rate:
-                                self.LOG.info(
-                                    f"触发群聊主动闲聊回复: 概率阈值={self.group_random_reply_rate}, 随机值={rand_val:.2f}"
-                                )
-                                self._handle_chitchat(ctx, None)
+                        rate = self._get_group_random_reply_rate(msg.roomid)
+                        if rate > 0:
+                            can_auto_reply = (
+                                not msg.from_self()
+                                and ctx.text
+                                and (msg.type == 1 or (msg.type == 49 and ctx.text))
+                            )
+                            if can_auto_reply:
+                                rand_val = random.random()
+                                if rand_val < rate:
+                                    self.LOG.info(
+                                        f"触发群聊主动闲聊回复: 群={msg.roomid}, 概率阈值={rate}, 随机值={rand_val:.2f}"
+                                    )
+                                    self._handle_chitchat(ctx, None)
                         
                 # 7.4 私聊消息，未被命令处理，进行闲聊
                 elif not msg.from_group() and not msg.from_self():
@@ -617,6 +644,12 @@ class Robot(Job):
             ChatType.PERPLEXITY.value: getattr(self.config, 'PERPLEXITY', None),
         }
         return mapping.get(model_id)
+
+    def _get_group_random_reply_rate(self, room_id: str) -> float:
+        mapping = getattr(self, 'group_random_reply_mapping', {})
+        if room_id and isinstance(mapping, dict) and room_id in mapping:
+            return mapping[room_id]
+        return getattr(self, 'group_random_reply_default', 0.0)
 
 
     def _select_model_for_message(self, msg: WxMsg) -> None:
