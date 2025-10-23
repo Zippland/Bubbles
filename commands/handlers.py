@@ -151,7 +151,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     latest_message_prompt = (
         "# 本轮需要处理的用户讯息\n"
         "请你基于下面这条最新收到的用户讯息，直接面向发送者进行自然的中文回复：\n"
-        f"{q_with_info}\n"
+        f"“{q_with_info}”\n"
         "请只围绕这条消息的内容作答，不要泛泛而谈。"
     )
 
