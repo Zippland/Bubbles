@@ -70,7 +70,7 @@ class Robot(Job):
                 numeric_rate = max(0.0, min(1.0, numeric_rate))
                 self.group_random_reply_mapping[room_id] = numeric_rate
 
-        self.group_random_reply_recovery = 0.02
+        self.group_random_reply_recovery = 0.01
         self.group_random_reply_state = {}
 
         if self.group_random_reply_default > 0:
