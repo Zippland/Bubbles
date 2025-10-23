@@ -148,10 +148,17 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         current_time = time.strftime("%H:%M", time.localtime())
         q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
     
+    latest_message_prompt = (
+        "# 本轮需要处理的用户讯息\n"
+        "请你基于下面这条最新收到的用户讯息，直接面向发送者进行自然的中文回复：\n"
+        f"{q_with_info}\n"
+        "请只围绕这条消息的内容作答，不要泛泛而谈。"
+    )
+
     # 获取AI回复
     try:
         if ctx.logger:
-            ctx.logger.info(f"【发送内容】将以下消息发送给AI: \n{q_with_info}")
+            ctx.logger.info(f"【发送内容】将以下消息发送给AI: \n{latest_message_prompt}")
         
         # 调用AI模型，传递特定历史限制
         tools = None
@@ -425,7 +432,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             tool_handler = handle_tool_call
 
         rsp = chat_model.get_answer(
-            question=q_with_info, 
+            question=latest_message_prompt, 
             wxid=ctx.get_receiver(),
             specific_max_history=specific_max_history,
             tools=tools,
@@ -528,15 +535,21 @@ def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool
                     current_time = time.strftime("%H:%M", time.localtime())
                     q_with_info = f"[{current_time}] {ctx.sender_name}: {prompt or '[空内容]'}"
                 
+                latest_message_prompt = (
+                    "请你基于下面这条最新收到的消息，直接面向发送者进行自然的中文回复：\n"
+                    f"{q_with_info}\n"
+                    "请只围绕这条消息的内容作答，不要泛泛而谈。"
+                )
+
                 if ctx.logger:
-                    ctx.logger.info(f"发送给默认AI的消息内容: {q_with_info}")
+                    ctx.logger.info(f"发送给默认AI的消息内容: {latest_message_prompt}")
                 
                 # 调用 AI 模型时传入备选 prompt
                 # 需要调整 get_answer 方法以支持 system_prompt_override 参数
                 # 这里我们假设已对各AI模型实现了这个参数
                 specific_max_history = getattr(ctx, 'specific_max_history', None)
                 rsp = chat_model.get_answer(
-                    question=q_with_info, 
+                    question=latest_message_prompt, 
                     wxid=ctx.get_receiver(), 
                     system_prompt_override=fallback_prompt,
                     specific_max_history=specific_max_history
