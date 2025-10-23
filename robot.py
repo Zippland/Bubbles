@@ -52,6 +52,7 @@ class Robot(Job):
         self.wxid = self.wcf.get_self_wxid() # 获取机器人自己的wxid
         self.allContacts = self.getAllContacts()
         self._msg_timestamps = []
+        self.group_random_reply_rate = 0.3
 
         try:
              db_path = "data/message_history.db"
@@ -334,7 +335,18 @@ class Robot(Job):
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
                         self._handle_chitchat(ctx, None)
                     else:
-                        pass
+                        can_auto_reply = (
+                            not msg.from_self()
+                            and ctx.text
+                            and (msg.type == 1 or (msg.type == 49 and ctx.text))
+                        )
+                        if can_auto_reply:
+                            rand_val = random.random()
+                            if rand_val < self.group_random_reply_rate:
+                                self.LOG.info(
+                                    f"触发群聊主动闲聊回复: 概率阈值={self.group_random_reply_rate}, 随机值={rand_val:.2f}"
+                                )
+                                self._handle_chitchat(ctx, None)
                         
                 # 7.4 私聊消息，未被命令处理，进行闲聊
                 elif not msg.from_group() and not msg.from_self():
