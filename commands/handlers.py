@@ -450,12 +450,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         )
         
         if rsp:
-            # 发送回复
-            at_list = ""
-            if ctx.is_group and not getattr(ctx, 'auto_random_reply', False):
-                at_list = ctx.msg.sender
-            ctx.send_text(rsp, at_list)
-            
+            ctx.send_text(rsp, "")
             return True
         else:
             if ctx.logger:
@@ -575,12 +570,7 @@ def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool
                 )
                 
                 if rsp:
-                    # 发送回复
-                    at_list = ""
-                    if ctx.is_group and not getattr(ctx, 'auto_random_reply', False):
-                        at_list = ctx.msg.sender
-                    ctx.send_text(rsp, at_list)
-                    
+                    ctx.send_text(rsp, "")
                     return True
                 else:
                     if ctx.logger:
