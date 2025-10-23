@@ -148,12 +148,21 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         current_time = time.strftime("%H:%M", time.localtime())
         q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
     
-    latest_message_prompt = (
-        "# 本轮需要处理的用户讯息\n"
-        "请你基于下面这条最新收到的用户讯息，直接面向发送者进行自然的中文回复：\n"
-        f"“{q_with_info}”\n"
-        "请只围绕这条消息的内容作答，不要泛泛而谈。"
-    )
+    if ctx.is_group and not ctx.is_at_bot and getattr(ctx, 'auto_random_reply', False):
+        latest_message_prompt = (
+            "# 群聊插话提醒\n"
+            "你目前是在群聊里主动接话，没有人点名让你发言。\n"
+            "请根据下面这句（或者你任选一句）最新消息插入一条自然、不突兀的中文回复，语气放松随和即可：\n"
+            f"“{q_with_info}”\n"
+            "不要重复对方的话，也不要显得过于正式。"
+        )
+    else:
+        latest_message_prompt = (
+            "# 本轮需要处理的用户讯息\n"
+            "请你基于下面这条最新收到的用户讯息，直接面向发送者进行自然的中文回复：\n"
+            f"“{q_with_info}”\n"
+            "请只围绕这条消息的内容作答，不要泛泛而谈。"
+        )
 
     # 获取AI回复
     try:
@@ -537,11 +546,19 @@ def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool
                     current_time = time.strftime("%H:%M", time.localtime())
                     q_with_info = f"[{current_time}] {ctx.sender_name}: {prompt or '[空内容]'}"
                 
-                latest_message_prompt = (
-                    "请你基于下面这条最新收到的消息，直接面向发送者进行自然的中文回复：\n"
-                    f"{q_with_info}\n"
-                    "请只围绕这条消息的内容作答，不要泛泛而谈。"
-                )
+                if ctx.is_group and not ctx.is_at_bot and getattr(ctx, 'auto_random_reply', False):
+                    latest_message_prompt = (
+                        "你目前是在群聊里主动接话，没有人点名让你发言。\n"
+                        "请根据下面这句最新消息插入一条自然、不突兀的中文回复，语气放松随和即可：\n"
+                        f"“{q_with_info}”\n"
+                        "不要重复对方的话，也不要显得过于正式。"
+                    )
+                else:
+                    latest_message_prompt = (
+                        "请你基于下面这条最新收到的消息，直接面向发送者进行自然的中文回复：\n"
+                        f"{q_with_info}\n"
+                        "请只围绕这条消息的内容作答，不要泛泛而谈。"
+                    )
 
                 if ctx.logger:
                     ctx.logger.info(f"发送给默认AI的消息内容: {latest_message_prompt}")
