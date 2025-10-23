@@ -70,7 +70,6 @@ class Robot(Job):
                 numeric_rate = max(0.0, min(1.0, numeric_rate))
                 self.group_random_reply_mapping[room_id] = numeric_rate
 
-        self.group_random_reply_recovery = 0.01
         self.group_random_reply_state = {}
 
         if self.group_random_reply_default > 0:
@@ -82,7 +81,7 @@ class Robot(Job):
                 f"群聊随机闲聊设置: 群={room_id}, 概率={rate}"
             )
         self.LOG.info(
-            "群聊随机闲聊动态策略: 命中后概率清零，每条新消息恢复 +0.05，直至配置的上限"
+            "群聊随机闲聊动态策略: 命中后概率清零，每条新消息恢复至多上限的 1/10"
         )
 
         try:
@@ -667,9 +666,9 @@ class Robot(Job):
         current = self.group_random_reply_state.get(room_id, base_rate)
         current = max(0.0, min(base_rate, current))
 
-        recovery = getattr(self, 'group_random_reply_recovery', 0.0)
-        if recovery > 0 and current < base_rate:
-            current = min(base_rate, current + recovery)
+        increment = max(0.0, base_rate / 10.0)
+        if increment > 0 and current < base_rate:
+            current = min(base_rate, current + increment)
 
         self.group_random_reply_state[room_id] = current
         return current
