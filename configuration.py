@@ -4,7 +4,6 @@
 import logging.config
 import os
 import shutil
-from typing import Dict, List
 
 import yaml
 
@@ -84,6 +83,7 @@ class Config(object):
 
         self.GROUP_RANDOM_CHITCHAT_DEFAULT = legacy_default
         self.GROUP_RANDOM_CHITCHAT = random_chitchat_mapping
+
         self.NEWS = yconfig["news"]["receivers"]
         self.CHATGPT = yconfig.get("chatgpt", {})
         self.DEEPSEEK = yconfig.get("deepseek", {})

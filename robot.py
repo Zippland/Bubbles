@@ -70,6 +70,9 @@ class Robot(Job):
                 numeric_rate = max(0.0, min(1.0, numeric_rate))
                 self.group_random_reply_mapping[room_id] = numeric_rate
 
+        self.group_random_reply_recovery = 0.05
+        self.group_random_reply_state = {}
+
         if self.group_random_reply_default > 0:
             self.LOG.info(
                 f"群聊随机闲聊默认开启，概率={self.group_random_reply_default}"
@@ -78,6 +81,9 @@ class Robot(Job):
             self.LOG.info(
                 f"群聊随机闲聊设置: 群={room_id}, 概率={rate}"
             )
+        self.LOG.info(
+            "群聊随机闲聊动态策略: 命中后概率清零，每条新消息恢复 +0.05，直至配置的上限"
+        )
 
         try:
              db_path = "data/message_history.db"
@@ -360,20 +366,22 @@ class Robot(Job):
                         # 调用handle_chitchat函数处理闲聊，传递完整的上下文
                         self._handle_chitchat(ctx, None)
                     else:
-                        rate = self._get_group_random_reply_rate(msg.roomid)
-                        if rate > 0:
-                            can_auto_reply = (
-                                not msg.from_self()
-                                and ctx.text
-                                and (msg.type == 1 or (msg.type == 49 and ctx.text))
-                            )
-                            if can_auto_reply:
+                        can_auto_reply = (
+                            not msg.from_self()
+                            and ctx.text
+                            and (msg.type == 1 or (msg.type == 49 and ctx.text))
+                        )
+                        if can_auto_reply:
+                            rate = self._prepare_group_random_reply_current_rate(msg.roomid)
+                            if rate > 0:
                                 rand_val = random.random()
                                 if rand_val < rate:
                                     self.LOG.info(
-                                        f"触发群聊主动闲聊回复: 群={msg.roomid}, 概率阈值={rate}, 随机值={rand_val:.2f}"
+                                        f"触发群聊主动闲聊回复: 群={msg.roomid}, 当前概率={rate:.2f}, 随机值={rand_val:.2f}"
                                     )
+                                    setattr(ctx, 'auto_random_reply', True)
                                     self._handle_chitchat(ctx, None)
+                                    self._apply_group_random_reply_decay(msg.roomid)
                         
                 # 7.4 私聊消息，未被命令处理，进行闲聊
                 elif not msg.from_group() and not msg.from_self():
@@ -645,12 +653,40 @@ class Robot(Job):
         }
         return mapping.get(model_id)
 
-    def _get_group_random_reply_rate(self, room_id: str) -> float:
+    def _get_group_random_reply_base_rate(self, room_id: str) -> float:
         mapping = getattr(self, 'group_random_reply_mapping', {})
         if room_id and isinstance(mapping, dict) and room_id in mapping:
             return mapping[room_id]
         return getattr(self, 'group_random_reply_default', 0.0)
 
+    def _prepare_group_random_reply_current_rate(self, room_id: str) -> float:
+        base_rate = self._get_group_random_reply_base_rate(room_id)
+        if base_rate <= 0:
+            return 0.0
+
+        current = self.group_random_reply_state.get(room_id, base_rate)
+        current = max(0.0, min(base_rate, current))
+
+        recovery = getattr(self, 'group_random_reply_recovery', 0.0)
+        if recovery > 0 and current < base_rate:
+            current = min(base_rate, current + recovery)
+
+        self.group_random_reply_state[room_id] = current
+        return current
+
+    def _apply_group_random_reply_decay(self, room_id: str) -> None:
+        base_rate = self._get_group_random_reply_base_rate(room_id)
+        if base_rate <= 0:
+            return
+
+        current = self.group_random_reply_state.get(room_id, base_rate)
+        current = max(0.0, min(base_rate, current))
+
+        current = 0.0
+        self.group_random_reply_state[room_id] = current
+        self.LOG.debug(
+            f"群聊随机闲聊概率已清零: 群={room_id}"
+        )
 
     def _select_model_for_message(self, msg: WxMsg) -> None:
         """根据消息来源选择对应的AI模型
