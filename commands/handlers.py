@@ -154,7 +154,7 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             "你目前是在群聊里主动接话，没有人点名让你发言。\n"
             "请根据下面这句（或者你任选一句）最新消息插入一条自然、不突兀的中文回复，语气放松随和即可：\n"
             f"“{q_with_info}”\n"
-            "不要重复对方的话，也不要显得过于正式。"
+            "不要重复任何已知的内容，提出新的思维碰撞（例如：基于上下文的新问题、不同角度的解释等，但是不要反驳任何内容），也不要显得过于正式。"
         )
     else:
         latest_message_prompt = (
