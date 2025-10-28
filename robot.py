@@ -304,6 +304,27 @@ class Robot(Job):
                 self._handle_chitchat(ctx, None)
                 return
 
+            if (
+                msg.from_group()
+                and ctx.is_at_bot
+                and (ctx.text or "").strip() == "总结"
+            ):
+                if self.message_summary:
+                    chat_model = getattr(ctx, 'chat', None)
+                    try:
+                        summary_text = self.message_summary.summarize_messages(
+                            msg.roomid,
+                            chat_model=chat_model
+                        )
+                    except Exception as summary_error:
+                        self.LOG.error(f"生成聊天总结失败: {summary_error}", exc_info=True)
+                        summary_text = "抱歉，总结时遇到问题，请稍后再试。"
+                else:
+                    summary_text = "总结功能尚未启用。"
+
+                ctx.send_text(summary_text, "")
+                return
+
             handled = False
 
             # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）

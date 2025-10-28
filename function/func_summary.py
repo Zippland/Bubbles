@@ -458,6 +458,52 @@ class MessageSummary:
             "total_messages": total_messages
         }
 
+    def _ai_summarize(self, messages, chat_model, chat_id):
+        """使用AI模型生成消息总结
+
+        Args:
+            messages: 消息列表 (格式同 get_messages 返回值)
+            chat_model: AI聊天模型对象
+            chat_id: 聊天ID
+
+        Returns:
+            str: 消息总结
+        """
+        if not messages:
+            return "没有可以总结的历史消息。"
+
+        formatted_msgs = []
+        for msg in messages:
+            # 使用新的时间格式和发送者
+            formatted_msgs.append(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
+
+        summary_system_prompt = (
+            "你是泡泡，请仔细阅读并分析以下聊天记录，生成一简要的、结构清晰且抓住重点的摘要。\n\n"
+            "摘要格式要求：\n"
+            "1. 使用数字编号列表 (例如 1., 2., 3.) 来组织内容，每个编号代表一个独立的主要讨论主题，不要超过3个主题。\n"
+            "2. 在每个编号的主题下，写成一段不带格式的文字，每个主题单独成段并空行，需包含以下内容：\n"
+            "    - 这个讨论的核心的简要描述。\n"
+            "    - 该讨论的关键成员 (用括号 [用户名] 格式) 和他们的关键发言内容、成员之间的关键互动。\n"
+            "    - 该讨论的讨论结果。\n"
+            "3. 总结需客观、精炼、简短精悍，直接呈现最核心且精简的事实，尽量不要添加额外的评论或分析，不要总结有关自己的事情。\n"
+            "4. 不要暴露出格式，不要说核心是xxx参与者是xxx结果是xxx，自然一点。\n"
+        )
+
+        prompt = "聊天记录如下：\n" + "\n".join(formatted_msgs)
+
+        try:
+            summary = chat_model.get_answer(
+                prompt,
+                f"summary_{chat_id}",
+                system_prompt_override=summary_system_prompt
+            )
+            if not summary:
+                return self._basic_summarize(messages)
+            return summary
+        except Exception as e:
+            self.LOG.error(f"使用AI生成总结失败: {e}")
+            return self._basic_summarize(messages)
+
     def _basic_summarize(self, messages):
         """基本的消息总结逻辑，不使用AI
 
@@ -476,6 +522,31 @@ class MessageSummary:
             res.append(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
 
         return "\n".join(res)
+
+    def summarize_messages(self, chat_id, chat_model=None):
+        """生成消息总结
+
+        Args:
+            chat_id: 聊天ID（群ID或用户ID）
+            chat_model: AI聊天模型对象，如果为None则使用基础总结
+
+        Returns:
+            str: 消息总结
+        """
+        messages = self.get_messages(chat_id)
+        if not messages:
+            return "没有可以总结的历史消息。"
+
+        if chat_model:
+            if hasattr(chat_model, 'get_answer') and hasattr(chat_model, 'message_summary') and chat_model.message_summary:
+                return self._ai_summarize(messages, chat_model, chat_id)
+            else:
+                self.LOG.warning(
+                    f"提供的 chat_model ({type(chat_model)}) 不支持基于数据库历史的总结或未正确初始化。将使用基础总结。"
+                )
+                return self._basic_summarize(messages)
+        else:
+            return self._basic_summarize(messages)
 
     def process_message_from_wxmsg(self, msg, wcf, all_contacts, bot_wxid=None):
         """从微信消息对象中处理并记录与总结相关的文本消息
