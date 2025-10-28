@@ -492,6 +492,7 @@ class MessageSummary:
         prompt = "聊天记录如下：\n" + "\n".join(formatted_msgs)
 
         try:
+            self.LOG.info(f"[Summary] chat_id={chat_id} 准备总结最近 {len(messages)} 条消息")
             summary = chat_model.get_answer(
                 prompt,
                 f"summary_{chat_id}",
