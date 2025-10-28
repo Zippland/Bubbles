@@ -11,6 +11,7 @@ import os  # 用于处理文件路径
 from function.func_xml_process import XmlProcessor  # 导入XmlProcessor
 
 MAX_DB_HISTORY_LIMIT = 10000
+SUMMARY_MESSAGE_LIMIT = 300
 
 
 def _is_internal_tool_message(content: str) -> bool:
@@ -535,6 +536,8 @@ class MessageSummary:
             str: 消息总结
         """
         messages = self.get_messages(chat_id)
+        if messages:
+            messages = messages[-SUMMARY_MESSAGE_LIMIT:]
         if not messages:
             return "没有可以总结的历史消息。"
 
