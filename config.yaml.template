@@ -142,10 +142,6 @@ perplexity:  # -----perplexity配置这行不填-----
   model_flash: mixtral-8x7b-instruct  # 快速回复模型（可选）
   model_reasoning: mixtral-8x7b-instruct  # 深度思考模型（可选）
   prompt: 你是Perplexity AI助手，请用专业、准确、有帮助的方式回答问题  # 角色设定
-  trigger_keyword: ask  # 触发Perplexity服务的前置词
-  allow_all: false  # 是否允许所有群聊和用户使用Perplexity，设为true时忽略下面的白名单配置
-  allowed_groups: []  # 允许使用Perplexity的群聊ID列表，例如：["123456789@chatroom", "123456789@chatroom"]
-  allowed_users: []  # 允许使用Perplexity的用户ID列表，例如：["wxid_123456789", "filehelper"]
 
 ai_router:  # -----AI路由器配置-----
   enable: true  # 是否启用AI路由功能

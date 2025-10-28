@@ -116,7 +116,7 @@ def ai_handle_perplexity(ctx: MessageContext, params: str) -> bool:
         return True
 
     # 调用Perplexity处理
-    content_for_perplexity = f"ask {query}"
+    content_for_perplexity = query
     chat_id = ctx.get_receiver()
     sender_wxid = ctx.msg.sender
     room_id = ctx.msg.roomid if ctx.is_group else None

@@ -311,13 +311,6 @@ class Perplexity:
             self.model_reasoning = None
         self.has_reasoning_model = bool(self.model_reasoning)
         
-        # 权限控制 - 允许使用Perplexity的群聊和个人ID
-        self.allowed_groups = config.get('allowed_groups', [])
-        self.allowed_users = config.get('allowed_users', [])
-        
-        # 可选的全局白名单模式 - 如果为True，则允许所有群聊和用户使用Perplexity
-        self.allow_all = config.get('allow_all', False)
-        
         # 设置编码环境变量，确保处理Unicode字符
         os.environ["PYTHONIOENCODING"] = "utf-8"
         
@@ -340,39 +333,10 @@ class Perplexity:
                 
                 self.LOG.info("Perplexity 客户端已初始化")
                 
-                # 记录权限配置信息
-                if self.allow_all:
-                    self.LOG.info("Perplexity配置为允许所有群聊和用户访问")
-                else:
-                    self.LOG.info(f"Perplexity允许的群聊: {len(self.allowed_groups)}个")
-                    self.LOG.info(f"Perplexity允许的用户: {len(self.allowed_users)}个")
-                
             except Exception as e:
                 self.LOG.error(f"初始化Perplexity客户端失败: {str(e)}")
         else:
             self.LOG.warning("未配置Perplexity API密钥")
-            
-    def is_allowed(self, chat_id, sender, from_group):
-        """检查是否允许使用Perplexity功能
-        
-        Args:
-            chat_id: 聊天ID（群ID或用户ID）
-            sender: 发送者ID
-            from_group: 是否来自群聊
-            
-        Returns:
-            bool: 是否允许使用Perplexity
-        """
-        # 全局白名单模式
-        if self.allow_all:
-            return True
-            
-        # 群聊消息
-        if from_group:
-            return chat_id in self.allowed_groups
-        # 私聊消息
-        else:
-            return sender in self.allowed_users
             
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -447,54 +411,43 @@ class Perplexity:
                 - bool: 是否已处理该消息
                 - Optional[str]: 无权限时的备选prompt，其他情况为None
         """
-        # 检查是否包含触发词
-        if content.startswith(self.trigger_keyword):
-            # 检查权限
-            if not self.is_allowed(chat_id, sender, from_group):
-                # 不在允许列表中，返回False让普通AI处理请求
-                # 但同时返回备选 prompt
-                self.LOG.info(f"用户/群聊 {chat_id} 无Perplexity权限，将使用 fallback_prompt 转由普通AI处理")
-                # 获取实际要问的问题内容
-                prompt = content[len(self.trigger_keyword):].strip()
-                if prompt:  # 确保确实有提问内容
-                    return False, self.fallback_prompt  # 返回 False 表示未处理，并带上备选 prompt
-                else:
-                    # 如果只有触发词没有问题，还是按原逻辑处理（发送提示消息）
-                    send_text_func(
-                        f"请在{self.trigger_keyword}后面添加您的问题",
-                        at_list=sender if from_group else "",
-                        record_message=False
-                    )
-                    return True, None  # 已处理（发送了错误提示）
-                
-            prompt = content[len(self.trigger_keyword):].strip()
-            if prompt:
-                # 确定接收者和@用户
-                receiver = roomid if from_group else sender
-                at_user = sender if from_group else None
-                
-                # 启动请求处理
-                request_started = self.thread_manager.start_request(
-                    perplexity_instance=self,
-                    prompt=prompt,
-                    chat_id=chat_id,
-                    send_text_func=send_text_func,
-                    receiver=receiver,
-                    at_user=at_user,
-                    enable_full_research=enable_full_research
-                )
-                return request_started, None  # 返回启动结果，无备选prompt
-            else:
-                # 触发词后没有内容
+        prompt = (content or "").strip()
+        if not prompt:
+            return False, None
+
+        stripped_by_keyword = False
+
+        trigger = (self.trigger_keyword or "").strip()
+        if trigger:
+            lowered_prompt = prompt.lower()
+            lowered_trigger = trigger.lower()
+            if lowered_prompt.startswith(lowered_trigger):
+                stripped_by_keyword = True
+                prompt = prompt[len(trigger):].strip()
+
+        if not prompt:
+            if stripped_by_keyword:
                 send_text_func(
-                    f"请在{self.trigger_keyword}后面添加您的问题",
+                    "请告诉我你想搜索什么内容",
                     at_list=sender if from_group else "",
                     record_message=False
                 )
-                return True, None  # 已处理（发送了错误提示）
-        
-        # 不包含触发词
-        return False, None  # 未处理，无备选prompt
+                return True, None
+            return False, None
+
+        receiver = roomid if from_group else sender
+        at_user = sender if from_group else None
+
+        request_started = self.thread_manager.start_request(
+            perplexity_instance=self,
+            prompt=prompt,
+            chat_id=chat_id,
+            send_text_func=send_text_func,
+            receiver=receiver,
+            at_user=at_user,
+            enable_full_research=enable_full_research
+        )
+        return request_started, None
     
     def cleanup(self):
         """清理所有资源"""
