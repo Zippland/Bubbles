@@ -4,6 +4,8 @@ import json # 确保已导入json
 from datetime import datetime # 确保已导入datetime
 import os # 导入os模块用于文件路径操作
 
+from function.func_persona import build_persona_system_prompt
+
 # 前向引用避免循环导入
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -440,11 +442,11 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             tools = [history_lookup_tool]
             tool_handler = handle_tool_call
 
-        system_prompt_override = None
         persona_text = getattr(ctx, 'persona', None)
-        if persona_text and getattr(ctx, 'robot', None):
+        system_prompt_override = None
+        if persona_text:
             try:
-                system_prompt_override = ctx.robot._build_system_prompt(chat_model, persona_text)
+                system_prompt_override = build_persona_system_prompt(chat_model, persona_text)
             except Exception as persona_exc:
                 if ctx.logger:
                     ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
@@ -575,9 +577,13 @@ def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool
                 specific_max_history = getattr(ctx, 'specific_max_history', None)
                 override_prompt = fallback_prompt
                 persona_text = getattr(ctx, 'persona', None)
-                if persona_text and getattr(ctx, 'robot', None):
+                if persona_text:
                     try:
-                        override_prompt = ctx.robot._build_system_prompt(chat_model, persona_text, override_prompt=fallback_prompt)
+                        override_prompt = build_persona_system_prompt(
+                            chat_model,
+                            persona_text,
+                            override_prompt=fallback_prompt
+                        )
                     except Exception as persona_exc:
                         if ctx.logger:
                             ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
