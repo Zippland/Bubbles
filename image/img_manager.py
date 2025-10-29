@@ -5,7 +5,7 @@ import shutil
 import time
 from wcferry import Wcf
 from configuration import Config
-from image import AliyunImage, GeminiImage
+from image import AliyunImage
 
 
 class ImageGenerationManager:
@@ -30,22 +30,9 @@ class ImageGenerationManager:
         
         # 初始化图像生成服务
         self.aliyun_image = None
-        self.gemini_image = None
         
         self.LOG.info("开始初始化图像生成服务...")
         
-        # 初始化Gemini图像生成服务
-        try:
-            if hasattr(self.config, 'GEMINI_IMAGE'):
-                self.gemini_image = GeminiImage(self.config.GEMINI_IMAGE)
-            else:
-                self.gemini_image = GeminiImage({})
-            
-            if getattr(self.gemini_image, 'enable', False):
-                self.LOG.info("谷歌Gemini图像生成功能已启用")
-        except Exception as e:
-            self.LOG.error(f"初始化谷歌Gemini图像生成服务失败: {e}")
-                       
         # 初始化AliyunImage服务
         if hasattr(self.config, 'ALIYUN_IMAGE') and self.config.ALIYUN_IMAGE.get('enable', False):
             try:
@@ -56,7 +43,7 @@ class ImageGenerationManager:
     
     def handle_image_generation(self, service_type, prompt, receiver, at_user=None):
         """处理图像生成请求的通用函数
-        :param service_type: 服务类型，'aliyun'/'gemini'
+        :param service_type: 服务类型，目前仅支持 'aliyun'
         :param prompt: 图像生成提示词
         :param receiver: 接收者ID
         :param at_user: 被@的用户ID，用于群聊
@@ -78,13 +65,6 @@ class ImageGenerationManager:
                 wait_message = "当前模型为阿里V1模型，生成速度非常慢，可能需要等待较长时间，请耐心等候..."
             else:
                 wait_message = "正在生成图像，请稍等..."
-        elif service_type == 'gemini':
-            if not self.gemini_image or not getattr(self.gemini_image, 'enable', False):
-                self.send_text("谷歌文生图服务未启用", receiver, at_user)
-                return True
-                
-            service = self.gemini_image
-            wait_message = "正在通过谷歌AI生成图像，请稍等..."
         else:
             self.LOG.error(f"未知的图像生成服务类型: {service_type}")
             return False
@@ -98,7 +78,7 @@ class ImageGenerationManager:
             try:
                 self.LOG.info(f"开始处理图片: {image_url}")
                 # 谷歌API直接返回本地文件路径，无需下载
-                image_path = image_url if service_type == 'gemini' else service.download_image(image_url)
+                image_path = service.download_image(image_url)
                 
                 if image_path:
                     # 创建一个临时副本，避免文件占用问题

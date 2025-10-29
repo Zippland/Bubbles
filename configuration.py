@@ -89,8 +89,6 @@ class Config(object):
         self.DEEPSEEK = yconfig.get("deepseek", {})
         self.PERPLEXITY = yconfig.get("perplexity", {})
         self.ALIYUN_IMAGE = yconfig.get("aliyun_image", {})
-        self.GEMINI_IMAGE = yconfig.get("gemini_image", {})
-        self.GEMINI = yconfig.get("gemini", {})
         self.AI_ROUTER = yconfig.get("ai_router", {"enable": True, "allowed_groups": []})
         self.AUTO_ACCEPT_FRIEND_REQUEST = yconfig.get("auto_accept_friend_request", False)
         self.MAX_HISTORY = yconfig.get("MAX_HISTORY", 300)

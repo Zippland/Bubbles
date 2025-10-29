@@ -6,15 +6,13 @@ class ChatType(IntEnum):
     # UnKnown = 0  # 未知, 即未设置
     CHATGPT = 1  # ChatGPT
     DEEPSEEK = 2  # DeepSeek
-    GEMINI = 3  # Gemini
     PERPLEXITY = 4  # Perplexity
 
     @staticmethod
     def is_in_chat_types(chat_type: int) -> bool:
         if chat_type in [ChatType.CHATGPT.value,
                         ChatType.DEEPSEEK.value,
-                        ChatType.PERPLEXITY.value,
-                        ChatType.GEMINI.value]:
+                        ChatType.PERPLEXITY.value]:
             return True
         return False
 

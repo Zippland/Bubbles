@@ -440,9 +440,20 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             tools = [history_lookup_tool]
             tool_handler = handle_tool_call
 
+        system_prompt_override = None
+        persona_text = getattr(ctx, 'persona', None)
+        if persona_text and getattr(ctx, 'robot', None):
+            try:
+                system_prompt_override = ctx.robot._build_system_prompt(chat_model, persona_text)
+            except Exception as persona_exc:
+                if ctx.logger:
+                    ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
+                system_prompt_override = None
+
         rsp = chat_model.get_answer(
             question=latest_message_prompt, 
             wxid=ctx.get_receiver(),
+            system_prompt_override=system_prompt_override,
             specific_max_history=specific_max_history,
             tools=tools,
             tool_handler=tool_handler,
@@ -562,10 +573,20 @@ def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool
                 # 需要调整 get_answer 方法以支持 system_prompt_override 参数
                 # 这里我们假设已对各AI模型实现了这个参数
                 specific_max_history = getattr(ctx, 'specific_max_history', None)
+                override_prompt = fallback_prompt
+                persona_text = getattr(ctx, 'persona', None)
+                if persona_text and getattr(ctx, 'robot', None):
+                    try:
+                        override_prompt = ctx.robot._build_system_prompt(chat_model, persona_text, override_prompt=fallback_prompt)
+                    except Exception as persona_exc:
+                        if ctx.logger:
+                            ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
+                        override_prompt = fallback_prompt
+
                 rsp = chat_model.get_answer(
                     question=latest_message_prompt, 
                     wxid=ctx.get_receiver(), 
-                    system_prompt_override=fallback_prompt,
+                    system_prompt_override=override_prompt,
                     specific_max_history=specific_max_history
                 )
                 
