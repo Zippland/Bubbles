@@ -656,7 +656,7 @@ class Robot(Job):
             current = getattr(ctx, "persona", None)
             if current:
                 ctx.send_text(
-                    f"{scope_label}当前的人设是：\n{current}\n发送“/set clear”可以清空，或重新发送“/set + 新人设”进行更新。\n也可以使用“/persona”随时查看当前人设。",
+                    f"{scope_label}当前的人设是：\n{current}\n\n发送“/set clear”可以清空，或重新发送“/set + 新人设”进行更新。\n也可以使用“/persona”随时查看当前人设。",
                     at_list
                 )
             else:
@@ -678,7 +678,7 @@ class Robot(Job):
             preview = persona_body if len(persona_body) <= 120 else persona_body[:120] + "..."
             ctx.send_text(
                 f"✅ {scope_label}人设设定成功：\n## 角色\n{preview}"
-                f"{'' if len(preview) == len(persona_body) else '...'}\n如需查看完整内容，可发送“/persona”。",
+                f"{'' if len(preview) == len(persona_body) else '...'}\n\n如需查看完整内容，可发送“/persona”\n如需清空人设，可发送“/set clear”",
                 at_list
             )
         except Exception as exc:
