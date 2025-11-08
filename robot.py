@@ -16,6 +16,7 @@ from wcferry import Wcf, WxMsg
 
 from ai_providers.ai_chatgpt import ChatGPT
 from ai_providers.ai_deepseek import DeepSeek
+from ai_providers.ai_kimi import Kimi
 from ai_providers.ai_perplexity import Perplexity
 from function.func_weather import Weather
 from function.func_news import News
@@ -157,6 +158,35 @@ class Robot(Job):
                     self.LOG.info(f"已加载 DeepSeek 推理模型: {reasoning_model_name}")
             except Exception as e:
                 self.LOG.error(f"初始化 DeepSeek 模型时出错: {str(e)}")
+        
+        # 初始化Kimi
+        if Kimi.value_check(self.config.KIMI):
+            try:
+                kimi_flash_conf = copy.deepcopy(self.config.KIMI)
+                flash_model_name = kimi_flash_conf.get("model_flash", "kimi-k2")
+                kimi_flash_conf["model"] = flash_model_name
+                self.chat_models[ChatType.KIMI.value] = Kimi(
+                    kimi_flash_conf,
+                    message_summary_instance=self.message_summary,
+                    bot_wxid=self.wxid
+                )
+                self.LOG.info(f"已加载 Kimi 模型: {flash_model_name}")
+
+                reasoning_model_name = self.config.KIMI.get("model_reasoning")
+                if not reasoning_model_name and flash_model_name != "kimi-k2-thinking":
+                    reasoning_model_name = "kimi-k2-thinking"
+
+                if reasoning_model_name and reasoning_model_name != flash_model_name:
+                    kimi_reason_conf = copy.deepcopy(self.config.KIMI)
+                    kimi_reason_conf["model"] = reasoning_model_name
+                    self.reasoning_chat_models[ChatType.KIMI.value] = Kimi(
+                        kimi_reason_conf,
+                        message_summary_instance=self.message_summary,
+                        bot_wxid=self.wxid
+                    )
+                    self.LOG.info(f"已加载 Kimi 推理模型: {reasoning_model_name}")
+            except Exception as e:
+                self.LOG.error(f"初始化 Kimi 模型时出错: {str(e)}")
         
             
         # 初始化Perplexity
@@ -666,6 +696,7 @@ class Robot(Job):
         mapping = {
             ChatType.CHATGPT.value: getattr(self.config, 'CHATGPT', None),
             ChatType.DEEPSEEK.value: getattr(self.config, 'DEEPSEEK', None),
+            ChatType.KIMI.value: getattr(self.config, 'KIMI', None),
             ChatType.PERPLEXITY.value: getattr(self.config, 'PERPLEXITY', None),
         }
         return mapping.get(model_id)

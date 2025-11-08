@@ -56,6 +56,8 @@ groups:
     # 0: 自动选择第一个可用模型
     # 1: ChatGPT
     # 2: DeepSeek
+    # 3: Kimi
+    # 4: Perplexity
     default: 0  # 默认模型ID（0表示自动选择第一个可用模型）
     # 群聊映射
     mapping:
@@ -107,6 +109,16 @@ deepseek:  # -----deepseek配置这行不填-----
   enable_reasoning: false  # 是否启用思维链功能，仅在使用 deepseek-reasoner 模型时有效
   show_reasoning: false  # 是否在回复中显示思维过程，仅在启用思维链功能时有效
   max_history_messages: 10 # <--- 添加这一行，设置 DeepSeek 最多回顾 10 条历史消息
+
+kimi:  # -----kimi配置-----
+  key:  # 填写你的 Moonshot API Key
+  api: https://api.moonshot.cn/v1  # Kimi API 地址
+  proxy:  # 国内可按需配置代理，例如：http://127.0.0.1:7890
+  model_flash: kimi-k2  # 快速回复模型
+  model_reasoning: kimi-k2-thinking  # 深度思考模型
+  prompt: 你是 Kimi，一个由 Moonshot AI 构建的可靠助手  # 角色设定
+  max_history_messages: 20  # 设置 Kimi 最多回顾 20 条历史消息
+  show_reasoning: false  # 是否在回复中附带 reasoning_content 内容
 
 aliyun_image:  # -----如果要使用阿里云文生图，取消下面的注释并填写相关内容，模型到阿里云百炼找通义万相-文生图2.1-Turbo-----
   enable: true  # 是否启用阿里文生图功能，false为关闭，默认开启，如果未配置，则会将消息发送给聊天大模型

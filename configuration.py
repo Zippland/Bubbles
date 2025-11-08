@@ -87,6 +87,7 @@ class Config(object):
         self.NEWS = yconfig["news"]["receivers"]
         self.CHATGPT = yconfig.get("chatgpt", {})
         self.DEEPSEEK = yconfig.get("deepseek", {})
+        self.KIMI = yconfig.get("kimi", {})
         self.PERPLEXITY = yconfig.get("perplexity", {})
         self.ALIYUN_IMAGE = yconfig.get("aliyun_image", {})
         self.AI_ROUTER = yconfig.get("ai_router", {"enable": True, "allowed_groups": []})
