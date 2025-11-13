@@ -22,6 +22,8 @@ class KeywordTriggerProcessor:
     def evaluate(self, ctx: MessageContext) -> KeywordTriggerDecision:
         raw_text = ctx.text or ""
         text = raw_text.strip()
+        if ctx.is_group and not getattr(ctx, "group_enabled", False):
+            return KeywordTriggerDecision()
         reasoning_requested = bool(
             raw_text
             and "想想" in raw_text
@@ -38,7 +40,7 @@ class KeywordTriggerProcessor:
         )
 
     def handle_summary(self, ctx: MessageContext) -> bool:
-        if not ctx.is_group:
+        if not ctx.is_group or not getattr(ctx, "group_enabled", False):
             return False
 
         if not self.message_summary:

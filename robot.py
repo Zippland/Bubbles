@@ -299,6 +299,13 @@ class Robot(Job):
             return all(value is not None for key, value in args.items() if key != 'proxy')
         return False
 
+    def _is_group_enabled(self, room_id: str) -> bool:
+        """判断群聊是否在配置的允许名单内。"""
+        if not room_id:
+            return False
+        enabled_groups = getattr(self.config, "GROUPS", None) or []
+        return room_id in enabled_groups
+
     def processMsg(self, msg: WxMsg) -> None:
         """
         处理收到的微信消息
@@ -322,6 +329,8 @@ class Robot(Job):
             setattr(ctx, 'specific_max_history', specific_limit)
             persona_text = fetch_persona_for_context(self, ctx)
             setattr(ctx, 'persona', persona_text)
+            group_enabled = ctx.is_group and self._is_group_enabled(msg.roomid)
+            setattr(ctx, 'group_enabled', group_enabled)
             trigger_decision = None
             if getattr(self, "keyword_trigger_processor", None):
                 trigger_decision = self.keyword_trigger_processor.evaluate(ctx)
@@ -336,7 +345,12 @@ class Robot(Job):
                 except Exception as forward_error:
                     self.LOG.error(f"消息转发失败: {forward_error}", exc_info=True)
 
-            if handle_persona_command(self, ctx):
+            if ctx.is_group and not group_enabled:
+                persona_allowed = False
+            else:
+                persona_allowed = True
+
+            if persona_allowed and handle_persona_command(self, ctx):
                 return
 
             if trigger_decision and trigger_decision.summary_requested:
@@ -351,7 +365,7 @@ class Robot(Job):
             handled = False
 
             # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）
-            if (msg.from_group() and msg.is_at(self.wxid)) or not msg.from_group():
+            if (msg.from_group() and group_enabled and msg.is_at(self.wxid)) or not msg.from_group():
                 self.LOG.debug(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
                 handled = ai_router.dispatch(ctx)
                 self.LOG.debug(f"[AI路由调试] AI路由器处理结果: {handled}")
@@ -387,7 +401,11 @@ class Robot(Job):
                 # 7.2 系统消息处理
                 elif msg.type == 10000:
                     # 7.2.1 处理新成员入群
-                    if "加入了群聊" in msg.content and msg.from_group():
+                    if (
+                        "加入了群聊" in msg.content
+                        and msg.from_group()
+                        and msg.roomid in getattr(self.config, "GROUPS", [])
+                    ):
                         new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
                         if new_member_match:
                             inviter = new_member_match.group(1)  # 邀请人
