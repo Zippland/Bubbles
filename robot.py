@@ -35,6 +35,8 @@ from function.func_xml_process import XmlProcessor
 # 导入上下文及常用处理函数
 from commands.context import MessageContext
 from commands.handlers import handle_chitchat  # 导入闲聊处理函数
+from commands.keyword_triggers import KeywordTriggerProcessor
+from commands.message_forwarder import MessageForwarder
 
 # 导入AI路由系统
 from commands.ai_router import ai_router
@@ -283,6 +285,14 @@ class Robot(Job):
             self.LOG.error(f"初始化人设管理器失败: {e}", exc_info=True)
             self.persona_manager = None
         
+        # 初始化关键词触发器与消息转发器
+        self.keyword_trigger_processor = KeywordTriggerProcessor(
+            self.message_summary,
+            self.LOG,
+        )
+        forwarding_conf = getattr(self.config, "MESSAGE_FORWARDING", {})
+        self.message_forwarder = MessageForwarder(self, forwarding_conf, self.LOG)
+        
     @staticmethod
     def value_check(args: dict) -> bool:
         if args:
@@ -312,39 +322,30 @@ class Robot(Job):
             setattr(ctx, 'specific_max_history', specific_limit)
             persona_text = fetch_persona_for_context(self, ctx)
             setattr(ctx, 'persona', persona_text)
-            ctx.reasoning_requested = bool(
-                ctx.text
-                and "想想" in ctx.text
-                and (not ctx.is_group or ctx.is_at_bot)
-            )
+            trigger_decision = None
+            if getattr(self, "keyword_trigger_processor", None):
+                trigger_decision = self.keyword_trigger_processor.evaluate(ctx)
+                ctx.reasoning_requested = trigger_decision.reasoning_requested
+                setattr(ctx, 'keyword_trigger_decision', trigger_decision)
+            else:
+                ctx.reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False))
+
+            if getattr(self, "message_forwarder", None):
+                try:
+                    self.message_forwarder.forward_if_needed(ctx)
+                except Exception as forward_error:
+                    self.LOG.error(f"消息转发失败: {forward_error}", exc_info=True)
 
             if handle_persona_command(self, ctx):
                 return
 
+            if trigger_decision and trigger_decision.summary_requested:
+                if self.keyword_trigger_processor.handle_summary(ctx):
+                    return
+
             if ctx.reasoning_requested:
                 self.LOG.info("检测到推理模式触发词，跳过AI路由，直接进入闲聊推理模式。")
                 self._handle_chitchat(ctx, None)
-                return
-
-            if (
-                msg.from_group()
-                and ctx.is_at_bot
-                and (ctx.text or "").strip() == "总结"
-            ):
-                if self.message_summary:
-                    chat_model = getattr(ctx, 'chat', None)
-                    try:
-                        summary_text = self.message_summary.summarize_messages(
-                            msg.roomid,
-                            chat_model=chat_model
-                        )
-                    except Exception as summary_error:
-                        self.LOG.error(f"生成聊天总结失败: {summary_error}", exc_info=True)
-                        summary_text = "抱歉，总结时遇到问题，请稍后再试。"
-                else:
-                    summary_text = "总结功能尚未启用。"
-
-                ctx.send_text(summary_text, "")
                 return
 
             handled = False

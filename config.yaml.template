@@ -78,6 +78,19 @@ groups:
         model: 8 
         max_history: 30  # 回顾最近30条消息
 
+message_forwarding:
+  enable: false  # 是否开启转发功能
+  rules:
+    - source_room_id: example12345@chatroom  # 需要监听的群ID
+      target_room_ids:
+        - example67890@chatroom  # 接受转发消息的群ID
+      keywords:
+        - "关键词1"
+        - "关键词2"
+    # - source_room_id: another_group@chatroom
+    #   target_room_ids: ["target_group@chatroom"]
+    #   keywords: ["需要的词"]
+
 MAX_HISTORY: 300 # 记录数据库的消息历史
 
 news:

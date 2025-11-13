@@ -94,3 +94,7 @@ class Config(object):
         self.AUTO_ACCEPT_FRIEND_REQUEST = yconfig.get("auto_accept_friend_request", False)
         self.MAX_HISTORY = yconfig.get("MAX_HISTORY", 300)
         self.SEND_RATE_LIMIT = yconfig.get("send_rate_limit", 0)
+        self.MESSAGE_FORWARDING = yconfig.get(
+            "message_forwarding",
+            {"enable": False, "rules": []}
+        )
