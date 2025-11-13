@@ -149,16 +149,9 @@ class MessageForwarder:
         return ""
 
     def _forward(self, rule: ForwardRule, ctx: MessageContext, payload: str) -> None:
-        sender_name = getattr(ctx, "sender_name", ctx.msg.sender)
-        group_alias = self._resolve_group_alias(rule.source_room_id)
-        forward_message = (
-            f"【转发自 {group_alias}｜{sender_name}】\n"
-            f"{payload}"
-        )
-
         for target_id in rule.target_room_ids:
             try:
-                self.robot.sendTextMsg(forward_message, target_id)
+                self.robot.sendTextMsg(payload, target_id)
                 if self.logger:
                     self.logger.info(
                         f"已将群 {rule.source_room_id} 的关键词消息转发至 {target_id}"
@@ -169,8 +162,3 @@ class MessageForwarder:
                         f"转发消息到 {target_id} 失败: {exc}",
                         exc_info=True,
                     )
-
-    def _resolve_group_alias(self, room_id: str) -> str:
-        contacts = getattr(self.robot, "allContacts", {}) or {}
-        alias = contacts.get(room_id)
-        return alias or room_id
