@@ -54,6 +54,7 @@ class MessageForwarder:
             or not ctx.is_group
             or not ctx.msg
             or ctx.msg.from_self()
+            or getattr(ctx, "has_quote_reference", False)
         ):
             return False
 

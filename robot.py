@@ -878,6 +878,7 @@ class Robot(Job):
         quoted_msg_id = None
         quoted_image_extra = None
         
+        msg_data = None
         # 处理引用消息等特殊情况
         if msg.type == 49 and ("<title>" in msg.content or "<appmsg" in msg.content):
             # 尝试提取引用消息中的文本
@@ -940,6 +941,9 @@ class Robot(Job):
         if is_quoted_image:
             setattr(ctx, 'quoted_msg_id', quoted_msg_id)
             setattr(ctx, 'quoted_image_extra', quoted_image_extra)
+        
+        # 标记是否引用了其他消息（用于后续逻辑过滤）
+        setattr(ctx, 'has_quote_reference', bool(msg_data and msg_data.get("has_quote")))
         
         # 获取发送者昵称
         ctx.sender_name = ctx.get_sender_alias_or_name()
