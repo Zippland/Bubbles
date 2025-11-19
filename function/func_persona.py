@@ -200,6 +200,10 @@ def handle_persona_command(robot: "Robot", ctx: "MessageContext") -> bool:
             ctx.send_text(f"{scope_label}当前没有设置人设。", at_list)
         return True
 
+    if len(persona_body) > 300:
+        ctx.send_text("❌ 人设描述长度不能超过 300 字，请精简后再试。", at_list)
+        return True
+
     try:
         manager.set_persona(chat_id, persona_body, setter_wxid=ctx.msg.sender)
         persona_body = persona_body.strip()
