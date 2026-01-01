@@ -677,11 +677,11 @@ class Robot(Job):
         reasoning_chat = None
 
         if reasoning_requested:
-            if force_reasoning and not getattr(ctx, 'reasoning_requested', False):
+            if force_reasoning:
                 self.LOG.info("群配置了 force_reasoning，闲聊将使用推理模型。")
             else:
                 self.LOG.info("检测到推理模式请求，将启用深度思考。")
-            ctx.send_text("正在深度思考，请稍候...", record_message=False)
+                ctx.send_text("正在深度思考，请稍候...", record_message=False)
             reasoning_chat = self._get_reasoning_chat_model()
             if reasoning_chat:
                 ctx.chat = reasoning_chat
