@@ -175,7 +175,10 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         tools = None
         tool_handler = None
 
-        if ctx.robot and getattr(ctx.robot, 'message_summary', None):
+        # 插嘴模式下不使用 function call，减少 token 消耗
+        is_auto_random_reply = getattr(ctx, 'auto_random_reply', False)
+
+        if ctx.robot and getattr(ctx.robot, 'message_summary', None) and not is_auto_random_reply:
             chat_id = ctx.get_receiver()
             message_summary = ctx.robot.message_summary
 

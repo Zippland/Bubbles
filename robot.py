@@ -331,6 +331,11 @@ class Robot(Job):
             setattr(ctx, 'persona', persona_text)
             group_enabled = ctx.is_group and self._is_group_enabled(msg.roomid)
             setattr(ctx, 'group_enabled', group_enabled)
+
+            # 检查是否配置了 force_reasoning（闲聊时强制使用推理模型，AI路由仍正常执行）
+            force_reasoning = getattr(self, '_current_force_reasoning', False)
+            setattr(ctx, 'force_reasoning', force_reasoning)
+
             trigger_decision = None
             if getattr(self, "keyword_trigger_processor", None):
                 trigger_decision = self.keyword_trigger_processor.evaluate(ctx)
@@ -665,12 +670,17 @@ class Robot(Job):
 
     def _handle_chitchat(self, ctx, match=None):
         """统一处理闲聊，自动切换推理模型"""
-        reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False))
+        # force_reasoning 配置会强制使用推理模型
+        force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
+        reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
         previous_ctx_chat = getattr(ctx, 'chat', None)
         reasoning_chat = None
 
         if reasoning_requested:
-            self.LOG.info("检测到推理模式请求，将启用深度思考。")
+            if force_reasoning and not getattr(ctx, 'reasoning_requested', False):
+                self.LOG.info("群配置了 force_reasoning，闲聊将使用推理模型。")
+            else:
+                self.LOG.info("检测到推理模式请求，将启用深度思考。")
             ctx.send_text("正在深度思考，请稍候...", record_message=False)
             reasoning_chat = self._get_reasoning_chat_model()
             if reasoning_chat:
@@ -759,12 +769,15 @@ class Robot(Job):
         """根据消息来源选择对应的AI模型
         :param msg: 接收到的消息
         """
+        # 重置 force_reasoning 标记
+        self._current_force_reasoning = False
+
         if not hasattr(self, 'chat_models') or not self.chat_models:
             return  # 没有可用模型，无需切换
-            
+
         # 获取消息来源ID
         source_id = msg.roomid if msg.from_group() else msg.sender
-        
+
         # 检查配置
         if not hasattr(self.config, 'GROUP_MODELS'):
             # 没有配置，使用默认模型
@@ -772,13 +785,15 @@ class Robot(Job):
                 self.chat = self.chat_models[self.default_model_id]
                 self.current_model_id = self.default_model_id
             return
-            
+
         # 群聊消息处理
         if msg.from_group():
             model_mappings = self.config.GROUP_MODELS.get('mapping', [])
             for mapping in model_mappings:
                 if mapping.get('room_id') == source_id:
                     model_id = mapping.get('model')
+                    # 读取 force_reasoning 配置
+                    self._current_force_reasoning = bool(mapping.get('force_reasoning', False))
                     if model_id in self.chat_models:
                         # 切换到指定模型
                         if self.chat != self.chat_models[model_id]:
