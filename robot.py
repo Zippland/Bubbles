@@ -6,9 +6,7 @@ import time
 import xml.etree.ElementTree as ET
 from queue import Empty
 from threading import Thread
-import os
 import random
-import shutil
 import copy
 from image.img_manager import ImageGenerationManager
 
@@ -37,10 +35,6 @@ from commands.context import MessageContext
 from commands.handlers import handle_chitchat  # 导入闲聊处理函数
 from commands.keyword_triggers import KeywordTriggerProcessor
 from commands.message_forwarder import MessageForwarder
-
-# 导入AI路由系统
-from commands.ai_router import ai_router
-import commands.ai_functions  # 导入以注册所有AI功能
 
 __version__ = "39.2.4.0"
 
@@ -264,8 +258,8 @@ class Robot(Job):
         # 初始化图像生成管理器
         self.image_manager = ImageGenerationManager(self.config, self.wcf, self.LOG, self.sendTextMsg)
         
-        # 初始化AI路由器
-        self.LOG.info(f"AI路由系统初始化完成，共加载 {len(ai_router.functions)} 个AI功能")
+        # 工具系统在首次 handle_chitchat 调用时自动加载
+        self.LOG.info("Agent 工具系统就绪（延迟加载）")
         
         # 初始化提醒管理器
         try:
@@ -363,99 +357,64 @@ class Robot(Job):
                     return
 
             if ctx.reasoning_requested:
-                self.LOG.info("检测到推理模式触发词，跳过AI路由，直接进入闲聊推理模式。")
+                self.LOG.info("检测到推理模式触发词，直接进入推理模式。")
                 self._handle_chitchat(ctx, None)
                 return
 
-            handled = False
-
-            # 5. 优先尝试使用AI路由器处理消息（仅限私聊或@机器人）
-            if (msg.from_group() and group_enabled and msg.is_at(self.wxid)) or not msg.from_group():
-                self.LOG.debug(f"[AI路由调试] 准备调用AI路由器处理消息: {msg.content}")
-                handled = ai_router.dispatch(ctx)
-                self.LOG.debug(f"[AI路由调试] AI路由器处理结果: {handled}")
-                router_decision = getattr(ctx, 'router_decision', None)
-                if router_decision:
-                    action_type = router_decision.get("action_type")
-                    if action_type == "chat":
-                        if router_decision.get("enable_reasoning"):
-                            self.LOG.info("AI路由器请求启用推理模式处理聊天消息")
-                        ctx.reasoning_requested = ctx.reasoning_requested or bool(router_decision.get("enable_reasoning"))
-                    else:
-                        if ctx.reasoning_requested:
-                            self.LOG.debug("AI路由器选择了非聊天模式，关闭推理模式")
-                        ctx.reasoning_requested = False
-                if handled:
-                    self.LOG.info("消息已由AI路由器处理")
-                    self.LOG.debug("[AI路由调试] 消息已成功由AI路由器处理")
-                    return
+            # 5. 特殊消息处理（非 AI 决策）
+            if msg.type == 37:  # 好友请求
+                if getattr(self.config, "AUTO_ACCEPT_FRIEND_REQUEST", False):
+                    self.LOG.info("检测到好友请求，自动通过。")
+                    self.autoAcceptFriendRequest(msg)
                 else:
-                    self.LOG.warning("[AI路由调试] AI路由器未处理该消息")
+                    self.LOG.info("检测到好友请求，保持待处理。")
+                return
 
-            # 6. 如果AI路由器未处理，则进行特殊逻辑处理
-            if not handled:
-                # 7.1 好友请求自动处理
-                if msg.type == 37:  # 好友请求
-                    if getattr(self.config, "AUTO_ACCEPT_FRIEND_REQUEST", False):
-                        self.LOG.info("检测到好友请求，自动通过开关已启用，准备同意。")
-                        self.autoAcceptFriendRequest(msg)
-                    else:
-                        self.LOG.info("检测到好友请求，自动通过开关已关闭，保持待处理状态。")
-                    return
-                    
-                # 7.2 系统消息处理
-                elif msg.type == 10000:
-                    # 7.2.1 处理新成员入群
-                    if (
-                        "加入了群聊" in msg.content
-                        and msg.from_group()
-                        and msg.roomid in getattr(self.config, "GROUPS", [])
-                    ):
-                        new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
-                        if new_member_match:
-                            inviter = new_member_match.group(1)  # 邀请人
-                            new_member = new_member_match.group(2)  # 新成员
-                            # 使用配置文件中的欢迎语，支持变量替换
-                            welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
-                            self.sendTextMsg(welcome_msg, msg.roomid)
-                            self.LOG.info(f"已发送欢迎消息给新成员 {new_member} 在群 {msg.roomid}")
-                        return
-                    # 7.2.2 处理新好友添加
-                    elif "你已添加了" in msg.content:
-                        self.sayHiToNewFriend(msg)
-                        return
-                
-                # 7.3 群聊消息，且配置了响应该群
-                if msg.from_group() and msg.roomid in self.config.GROUPS:
-                    # 如果在群里被@了，但AI路由器未处理，则进行闲聊
-                    if msg.is_at(self.wxid):
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        self._handle_chitchat(ctx, None)
-                    else:
-                        can_auto_reply = (
-                            not msg.from_self()
-                            and ctx.text
-                            and (msg.type == 1 or (msg.type == 49 and ctx.text))
-                        )
-                        if can_auto_reply:
-                            rate = self._prepare_group_random_reply_current_rate(msg.roomid)
-                            if rate > 0:
-                                rand_val = random.random()
-                                if rand_val < rate:
-                                    self.LOG.info(
-                                        f"触发群聊主动闲聊回复: 群={msg.roomid}, 当前概率={rate:.2f}, 随机值={rand_val:.2f}"
-                                    )
-                                    setattr(ctx, 'auto_random_reply', True)
-                                    self._handle_chitchat(ctx, None)
-                                    self._apply_group_random_reply_decay(msg.roomid)
-                        
-                # 7.4 私聊消息，未被命令处理，进行闲聊
-                elif not msg.from_group() and not msg.from_self():
-                    # 检查是否是文本消息(type 1)或者是包含用户输入的类型49消息
-                    if msg.type == 1 or (msg.type == 49 and ctx.text):
-                        self.LOG.info(f"准备回复私聊消息: 类型={msg.type}, 文本内容='{ctx.text}'")
-                        # 调用handle_chitchat函数处理闲聊，传递完整的上下文
-                        self._handle_chitchat(ctx, None)
+            if msg.type == 10000:  # 系统消息
+                if (
+                    "加入了群聊" in msg.content
+                    and msg.from_group()
+                    and msg.roomid in getattr(self.config, "GROUPS", [])
+                ):
+                    new_member_match = re.search(r'"(.+?)"邀请"(.+?)"加入了群聊', msg.content)
+                    if new_member_match:
+                        inviter = new_member_match.group(1)
+                        new_member = new_member_match.group(2)
+                        welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
+                        self.sendTextMsg(welcome_msg, msg.roomid)
+                return
+
+            if msg.type == 10000 and "你已添加了" in msg.content:
+                self.sayHiToNewFriend(msg)
+                return
+
+            # 6. Agent 响应：LLM 自主决定调什么工具
+            # 6.1 群聊：@机器人 或 随机插嘴
+            if msg.from_group() and msg.roomid in self.config.GROUPS:
+                if msg.is_at(self.wxid):
+                    self._handle_chitchat(ctx, None)
+                else:
+                    can_auto_reply = (
+                        not msg.from_self()
+                        and ctx.text
+                        and (msg.type == 1 or (msg.type == 49 and ctx.text))
+                    )
+                    if can_auto_reply:
+                        rate = self._prepare_group_random_reply_current_rate(msg.roomid)
+                        if rate > 0:
+                            rand_val = random.random()
+                            if rand_val < rate:
+                                self.LOG.info(
+                                    f"触发群聊主动闲聊: 群={msg.roomid}, 概率={rate:.2f}, 随机值={rand_val:.2f}"
+                                )
+                                setattr(ctx, 'auto_random_reply', True)
+                                self._handle_chitchat(ctx, None)
+                                self._apply_group_random_reply_decay(msg.roomid)
+
+            # 6.2 私聊
+            elif not msg.from_group() and not msg.from_self():
+                if msg.type == 1 or (msg.type == 49 and ctx.text):
+                    self._handle_chitchat(ctx, None)
                     
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)
@@ -668,38 +627,73 @@ class Robot(Job):
             return None
         return self.reasoning_chat_models.get(model_id)
 
+    def _get_fallback_model_ids(self) -> list:
+        """从配置中读取全局 fallback 模型 ID 列表。"""
+        if not hasattr(self.config, "GROUP_MODELS"):
+            return []
+        raw = self.config.GROUP_MODELS.get("fallbacks", [])
+        if isinstance(raw, list):
+            return [int(x) for x in raw if isinstance(x, (int, float, str))]
+        return []
+
     def _handle_chitchat(self, ctx, match=None):
-        """统一处理闲聊，自动切换推理模型"""
-        # force_reasoning 配置会强制使用推理模型
+        """统一处理消息，支持推理模式切换和模型 Fallback。"""
         force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
         reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
-        previous_ctx_chat = getattr(ctx, 'chat', None)
-        reasoning_chat = None
+        original_chat = getattr(ctx, 'chat', None)
 
         if reasoning_requested:
             if force_reasoning:
-                self.LOG.info("群配置了 force_reasoning，闲聊将使用推理模型。")
+                self.LOG.info("群配置了 force_reasoning，将使用推理模型。")
             else:
                 self.LOG.info("检测到推理模式请求，将启用深度思考。")
                 ctx.send_text("正在深度思考，请稍候...", record_message=False)
             reasoning_chat = self._get_reasoning_chat_model()
             if reasoning_chat:
                 ctx.chat = reasoning_chat
-                model_label = self._describe_chat_model(reasoning_chat, reasoning=True)
-                self.LOG.debug(f"使用推理模型 {model_label} 处理消息")
             else:
-                self.LOG.warning("当前模型未配置推理模型，使用默认模型处理深度思考请求")
+                self.LOG.warning("当前模型未配置推理模型，使用默认模型")
+
+        # 构建候选模型列表：当前模型 + fallback
+        primary_id = getattr(self, 'current_model_id', None)
+        fallback_ids = self._get_fallback_model_ids()
+        candidate_ids = []
+        if primary_id is not None:
+            candidate_ids.append(primary_id)
+        for fid in fallback_ids:
+            if fid not in candidate_ids and fid in self.chat_models:
+                candidate_ids.append(fid)
 
         handled = False
-        try:
-            handled = handle_chitchat(ctx, match)
-        finally:
-            if reasoning_chat and previous_ctx_chat is not None:
-                ctx.chat = previous_ctx_chat
+        for i, model_id in enumerate(candidate_ids):
+            if i > 0:
+                # 切换到 fallback 模型
+                fallback_model = self.chat_models[model_id]
+                if reasoning_requested:
+                    fallback_reasoning = self.reasoning_chat_models.get(model_id)
+                    ctx.chat = fallback_reasoning or fallback_model
+                else:
+                    ctx.chat = fallback_model
+                model_name = getattr(ctx.chat, '__class__', type(ctx.chat)).__name__
+                self.LOG.info(f"Fallback: 切换到模型 {model_name}(ID:{model_id})")
 
-        if reasoning_requested and not handled:
-            self.LOG.warning("推理模式处理消息失败，向用户返回降级提示")
-            ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
+            try:
+                handled = handle_chitchat(ctx, match)
+                if handled:
+                    break
+            except Exception as e:
+                self.LOG.warning(f"模型 {model_id} 调用失败: {e}")
+                continue
+
+        # 恢复原始模型
+        if original_chat is not None:
+            ctx.chat = original_chat
+
+        if not handled:
+            if reasoning_requested:
+                ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
+            else:
+                ctx.send_text("抱歉，服务暂时不可用，请稍后再试。")
 
         return handled
 

@@ -77,18 +77,27 @@ class Kimi:
         api_messages.append({"role": "system", "content": f"Current time is: {now_time}"})
 
         if self.message_summary and self.bot_wxid:
-            history = self.message_summary.get_messages(wxid)
-
             limit_to_use = specific_max_history if specific_max_history is not None else self.max_history_messages
             try:
                 limit_to_use = int(limit_to_use) if limit_to_use is not None else None
             except (TypeError, ValueError):
                 limit_to_use = self.max_history_messages
 
-            if limit_to_use is not None and limit_to_use > 0:
-                history = history[-limit_to_use:]
-            elif limit_to_use == 0:
+            if limit_to_use == 0:
                 history = []
+                context_summary = None
+            elif hasattr(self.message_summary, 'get_compressed_context'):
+                history, context_summary = self.message_summary.get_compressed_context(
+                    wxid, max_context_chars=8000, max_recent=limit_to_use
+                )
+            else:
+                history = self.message_summary.get_messages(wxid)
+                if limit_to_use and limit_to_use > 0:
+                    history = history[-limit_to_use:]
+                context_summary = None
+
+            if context_summary:
+                api_messages.append({"role": "system", "content": f"Earlier conversation context:\n{context_summary}"})
 
             for msg in history:
                 role = "assistant" if msg.get("sender_wxid") == self.bot_wxid else "user"
@@ -97,8 +106,7 @@ class Kimi:
                     continue
                 if role == "user":
                     sender_name = msg.get("sender", "未知用户")
-                    formatted_content = f"{sender_name}: {content}"
-                    api_messages.append({"role": role, "content": formatted_content})
+                    api_messages.append({"role": role, "content": f"{sender_name}: {content}"})
                 else:
                     api_messages.append({"role": role, "content": content})
         else:
@@ -132,18 +140,12 @@ class Kimi:
 
             return response_text
 
-        except AuthenticationError:
-            self.LOG.error("Kimi API 认证失败，请检查 API 密钥是否正确")
-            return "Kimi API 认证失败，请检查配置。"
-        except APIConnectionError:
-            self.LOG.error("无法连接到 Kimi API，请检查网络或代理设置")
-            return "无法连接到 Kimi 服务，请稍后再试。"
-        except APIError as api_err:
-            self.LOG.error(f"Kimi API 返回错误：{api_err}")
-            return f"Kimi API 错误：{api_err}"
-        except Exception as exc:
-            self.LOG.error(f"Kimi 处理请求时出现未知错误：{exc}", exc_info=True)
-            return "处理请求时出现未知错误，请稍后再试。"
+        except (AuthenticationError, APIConnectionError, APIError) as e:
+            self.LOG.error(f"Kimi API 调用失败: {e}")
+            raise
+        except Exception as e:
+            self.LOG.error(f"Kimi 未知错误: {e}", exc_info=True)
+            raise
 
     def _execute_with_tools(
         self,

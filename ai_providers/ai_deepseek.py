@@ -78,32 +78,39 @@ class DeepSeek():
         api_messages.append({"role": "system", "content": f"{time_mk}{now_time}"})
 
 
-        # 2. 获取并格式化历史消息
+        # 2. 获取并格式化历史消息（使用上下文压缩）
         if self.message_summary and self.bot_wxid:
-            history = self.message_summary.get_messages(wxid)
-
-            # 限制历史消息数量
-            # 优先使用传入的特定限制，如果没有则使用模型默认限制
             limit_to_use = specific_max_history if specific_max_history is not None else self.max_history_messages
-            self.LOG.debug(f"获取历史记录 for {wxid}, 原始条数: {len(history)}, 使用限制: {limit_to_use}")
-            
-            if limit_to_use is not None and limit_to_use > 0:
-                 history = history[-limit_to_use:] # 取最新的 N 条
-            elif limit_to_use == 0: # 如果设置为0，则不包含历史
-                 history = []
-                 
-            self.LOG.debug(f"应用限制后历史条数: {len(history)}")
+            try:
+                limit_to_use = int(limit_to_use) if limit_to_use is not None else None
+            except (TypeError, ValueError):
+                limit_to_use = self.max_history_messages
+
+            if limit_to_use == 0:
+                history = []
+                context_summary = None
+            elif hasattr(self.message_summary, 'get_compressed_context'):
+                history, context_summary = self.message_summary.get_compressed_context(
+                    wxid, max_context_chars=8000, max_recent=limit_to_use
+                )
+            else:
+                history = self.message_summary.get_messages(wxid)
+                if limit_to_use and limit_to_use > 0:
+                    history = history[-limit_to_use:]
+                context_summary = None
+
+            if context_summary:
+                api_messages.append({"role": "system", "content": f"Earlier conversation context:\n{context_summary}"})
 
             for msg in history:
                 role = "assistant" if msg.get("sender_wxid") == self.bot_wxid else "user"
                 content = msg.get('content', '')
                 if content:
                     if role == "user":
-                        sender_name = msg.get('sender', '未知用户') # 获取发送者名字
-                        formatted_content = f"{sender_name}: {content}" # 格式化内容
-                        api_messages.append({"role": role, "content": formatted_content})
-                    else: # 助手消息
-                         api_messages.append({"role": role, "content": content})
+                        sender_name = msg.get('sender', '未知用户')
+                        api_messages.append({"role": role, "content": f"{sender_name}: {content}"})
+                    else:
+                        api_messages.append({"role": role, "content": content})
         else:
             self.LOG.warning(f"无法为 wxid={wxid} 获取历史记录，因为 message_summary 或 bot_wxid 未设置。")
 
@@ -125,12 +132,12 @@ class DeepSeek():
             )
             return final_response
 
-        except (APIConnectionError, APIError, AuthenticationError) as e1:
-            self.LOG.error(f"DeepSeek API 返回了错误：{str(e1)}")
-            return f"DeepSeek API 返回了错误：{str(e1)}"
-        except Exception as e0:
-            self.LOG.error(f"发生未知错误：{str(e0)}", exc_info=True)
-            return "抱歉，处理您的请求时出现了错误"
+        except (APIConnectionError, APIError, AuthenticationError) as e:
+            self.LOG.error(f"DeepSeek API 调用失败: {e}")
+            raise
+        except Exception as e:
+            self.LOG.error(f"DeepSeek 未知错误: {e}", exc_info=True)
+            raise
 
     def _execute_with_tools(
         self,

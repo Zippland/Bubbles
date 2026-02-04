@@ -784,3 +784,77 @@ class MessageSummary:
 
         collected.reverse()
         return collected
+
+    # ── 上下文压缩 ────────────────────────────────────────
+
+    def get_compressed_context(self, chat_id, max_context_chars=8000, max_recent=None):
+        """返回压缩后的上下文：近期完整消息 + 早期消息摘要。
+
+        使用字符预算而非固定条数，短消息多保留、长消息少保留，充分利用上下文窗口。
+
+        Args:
+            chat_id: 聊天 ID
+            max_context_chars: 近期消息的字符预算（粗略对应 token 数的 2 倍）
+            max_recent: 近期消息条数硬上限，None 表示不限制
+
+        Returns:
+            tuple: (recent_messages, summary_text)
+                recent_messages: 按时间升序的消息 dict 列表
+                summary_text: 早期消息的压缩摘要，无需压缩时为 None
+        """
+        messages = self.get_messages(chat_id)
+        if not messages:
+            return [], None
+
+        # 从最新消息倒序填充，直到字符预算或条数上限耗尽
+        char_budget = max_context_chars
+        recent = []
+        cutoff_idx = len(messages)
+
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            content = msg.get("content", "")
+            if _is_internal_tool_message(content):
+                continue
+            sender = msg.get("sender", "")
+            msg_chars = len(sender) + 2 + len(content)  # "sender: content"
+
+            if char_budget - msg_chars < 0 and recent:
+                break  # 预算耗尽
+
+            char_budget -= msg_chars
+            recent.insert(0, msg)
+            cutoff_idx = i
+
+            if max_recent and len(recent) >= max_recent:
+                break
+
+        # 没有更早的消息，无需压缩
+        older = [m for m in messages[:cutoff_idx]
+                 if not _is_internal_tool_message(m.get("content", ""))]
+        if not older:
+            return recent, None
+
+        # 压缩早期消息
+        summary_budget = min(2000, max(500, char_budget))
+        summary = self._compress_messages(older, summary_budget)
+        return recent, summary
+
+    def _compress_messages(self, messages, max_chars=2000):
+        """将消息列表压缩成简短文本，保留最近的信息优先。"""
+        lines = []
+        for msg in messages:
+            line = f"[{msg.get('time', '')}] {msg.get('sender', '')}: {msg.get('content', '')}"
+            lines.append(line)
+
+        text = "\n".join(lines)
+        if len(text) <= max_chars:
+            return text
+
+        # 超预算：保留最近的部分（靠后的消息更重要）
+        text = text[-max_chars:]
+        newline_idx = text.find("\n")
+        if 0 < newline_idx < 100:
+            text = text[newline_idx + 1:]
+
+        return f"(earlier messages omitted)\n{text}"

@@ -1,8 +1,9 @@
 import re
 from typing import Optional, Match, Dict, Any
-import json # 确保已导入json
-from datetime import datetime # 确保已导入datetime
-import os # 导入os模块用于文件路径操作
+import json
+from datetime import datetime
+import os
+import time as time_mod
 
 from function.func_persona import build_persona_system_prompt
 
@@ -13,9 +14,10 @@ if TYPE_CHECKING:
 
 DEFAULT_CHAT_HISTORY = 30
 
+
 def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     """
-    处理闲聊，调用AI模型生成回复
+    Agent 入口 —— 处理用户消息，LLM 自主决定是否调用工具。
     """
     # 获取对应的AI模型
     chat_model = None
@@ -23,13 +25,13 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         chat_model = ctx.chat
     elif ctx.robot and hasattr(ctx.robot, 'chat'):
         chat_model = ctx.robot.chat
-    
+
     if not chat_model:
         if ctx.logger:
-            ctx.logger.error("没有可用的AI模型处理闲聊")
+            ctx.logger.error("没有可用的AI模型")
         ctx.send_text("抱歉，我现在无法进行对话。")
         return False
-    
+
     # 获取特定的历史消息数量限制
     raw_specific_max_history = getattr(ctx, 'specific_max_history', None)
     specific_max_history = None
@@ -39,432 +41,93 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
         except (TypeError, ValueError):
             specific_max_history = None
         if specific_max_history is not None:
-            if specific_max_history < 10:
-                specific_max_history = 10
-            elif specific_max_history > 300:
-                specific_max_history = 300
+            specific_max_history = max(10, min(300, specific_max_history))
     if specific_max_history is None:
         specific_max_history = DEFAULT_CHAT_HISTORY
     setattr(ctx, 'specific_max_history', specific_max_history)
-    if ctx.logger:
-        ctx.logger.debug(f"为 {ctx.get_receiver()} 使用特定历史限制: {specific_max_history}")
-    
-    #  处理引用图片情况
+
+    # ── 引用图片特殊处理 ──────────────────────────────────
     if getattr(ctx, 'is_quoted_image', False):
-        ctx.logger.info("检测到引用图片消息，尝试处理图片内容...")
-        
-        import os
-        from ai_providers.ai_chatgpt import ChatGPT
-        
-        # 确保是 ChatGPT 类型且支持图片处理
-        support_vision = False
-        if isinstance(chat_model, ChatGPT):
-            if hasattr(chat_model, 'support_vision') and chat_model.support_vision:
-                support_vision = True
-            else:
-                # 检查模型名称判断是否支持视觉
-                if hasattr(chat_model, 'model'):
-                    model_name = getattr(chat_model, 'model', '')
-                    support_vision = model_name == "gpt-4.1-mini" or model_name == "gpt-4o" or "-vision" in model_name
-        
-        if not support_vision:
-            ctx.send_text("抱歉，当前 AI 模型不支持处理图片。请联系管理员配置支持视觉的模型 (如 gpt-4-vision-preview、gpt-4o 等)。")
-            return True
-        
-        # 下载图片并处理
-        try:
-            # 创建临时目录
-            temp_dir = "temp/image_cache"
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            # 下载图片
-            ctx.logger.info(f"正在下载引用图片: msg_id={ctx.quoted_msg_id}")
-            image_path = ctx.wcf.download_image(
-                id=ctx.quoted_msg_id,
-                extra=ctx.quoted_image_extra,
-                dir=temp_dir,
-                timeout=30
-            )
-            
-            if not image_path or not os.path.exists(image_path):
-                ctx.logger.error(f"图片下载失败: {image_path}")
-                ctx.send_text("抱歉，无法下载图片进行分析。")
-                return True
-            
-            ctx.logger.info(f"图片下载成功: {image_path}，准备分析...")
-            
-            # 调用 ChatGPT 分析图片
-            try:
-                # 根据用户的提问构建 prompt
-                prompt = ctx.text
-                if not prompt or prompt.strip() == "":
-                    prompt = "请详细描述这张图片中的内容"
-                
-                # 调用图片分析函数
-                response = chat_model.get_image_description(image_path, prompt)
-                ctx.send_text(response)
-                
-                ctx.logger.info("图片分析完成并已发送回复")
-            except Exception as e:
-                ctx.logger.error(f"分析图片时出错: {e}")
-                ctx.send_text(f"分析图片时出错: {str(e)}")
-            
-            # 清理临时图片
-            try:
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    ctx.logger.info(f"临时图片已删除: {image_path}")
-            except Exception as e:
-                ctx.logger.error(f"删除临时图片出错: {e}")
-            
-            return True  # 已处理，不执行后续的普通文本处理流程
-            
-        except Exception as e:
-            ctx.logger.error(f"处理引用图片过程中出错: {e}")
-            ctx.send_text(f"处理图片时发生错误: {str(e)}")
-            return True  # 已处理，即使出错也不执行后续普通文本处理
-    
-    # 获取消息内容
+        return _handle_quoted_image(ctx, chat_model)
+
+    # ── 构建用户消息 ──────────────────────────────────────
     content = ctx.text
     sender_name = ctx.sender_name
-    
-    # 使用XML处理器格式化消息
+
     if ctx.robot and hasattr(ctx.robot, "xml_processor"):
-        # 创建格式化的聊天内容（带有引用消息等）
         if ctx.is_group:
-            # 处理群聊消息
             msg_data = ctx.robot.xml_processor.extract_quoted_message(ctx.msg)
-            q_with_info = ctx.robot.xml_processor.format_message_for_ai(msg_data, sender_name)
         else:
-            # 处理私聊消息
             msg_data = ctx.robot.xml_processor.extract_private_quoted_message(ctx.msg)
-            q_with_info = ctx.robot.xml_processor.format_message_for_ai(msg_data, sender_name)
-        
+        q_with_info = ctx.robot.xml_processor.format_message_for_ai(msg_data, sender_name)
         if not q_with_info:
-            import time
-            current_time = time.strftime("%H:%M", time.localtime())
+            current_time = time_mod.strftime("%H:%M", time_mod.localtime())
             q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
     else:
-        # 简单格式化
-        import time
-        current_time = time.strftime("%H:%M", time.localtime())
+        current_time = time_mod.strftime("%H:%M", time_mod.localtime())
         q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
-    
-    if ctx.is_group and not ctx.is_at_bot and getattr(ctx, 'auto_random_reply', False):
+
+    is_auto_random_reply = getattr(ctx, 'auto_random_reply', False)
+
+    if ctx.is_group and not ctx.is_at_bot and is_auto_random_reply:
         latest_message_prompt = (
             "# 群聊插话提醒\n"
             "你目前是在群聊里主动接话，没有人点名让你发言。\n"
             "请根据下面这句（或者你任选一句）最新消息插入一条自然、不突兀的中文回复，语气放松随和即可：\n"
-            f"“{q_with_info}”\n"
+            f"\u201c{q_with_info}\u201d\n"
             "不要重复任何已知的内容，提出新的思维碰撞（例如：基于上下文的新问题、不同角度的解释等，但是不要反驳任何内容），也不要显得过于正式。"
         )
     else:
         latest_message_prompt = (
             "# 本轮需要回复的用户及其最新信息\n"
             "请你基于下面这条最新收到的用户讯息（和该用户最近的历史消息），直接面向发送者进行自然的中文回复：\n"
-            f"“{q_with_info}”\n"
+            f"\u201c{q_with_info}\u201d\n"
             "请只针对该用户进行回复。"
         )
 
-    # 获取AI回复
+    # ── 构建工具列表 ──────────────────────────────────────
+    tools = None
+    tool_handler = None
+
+    # 插嘴模式不使用工具，减少 token 消耗
+    if not is_auto_random_reply:
+        from tools import tool_registry
+        # 导入工具模块以触发注册（仅首次生效）
+        import tools.history
+        import tools.reminder
+        import tools.web_search
+
+        openai_tools = tool_registry.get_openai_tools()
+        if openai_tools:
+            tools = openai_tools
+            tool_handler = tool_registry.create_handler(ctx)
+
+    # ── 构建系统提示 ──────────────────────────────────────
+    persona_text = getattr(ctx, 'persona', None)
+    system_prompt_override = None
+    if persona_text:
+        try:
+            system_prompt_override = build_persona_system_prompt(chat_model, persona_text)
+        except Exception as persona_exc:
+            if ctx.logger:
+                ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
+
+    # ── 调用 LLM（Agent 循环在 _execute_with_tools 中）──
     try:
         if ctx.logger:
-            ctx.logger.info(f"【发送内容】将以下消息发送给AI: \n{latest_message_prompt}")
-        
-        # 调用AI模型，传递特定历史限制
-        tools = None
-        tool_handler = None
-
-        # 插嘴模式下不使用 function call，减少 token 消耗
-        is_auto_random_reply = getattr(ctx, 'auto_random_reply', False)
-
-        if ctx.robot and getattr(ctx.robot, 'message_summary', None) and not is_auto_random_reply:
-            chat_id = ctx.get_receiver()
-            message_summary = ctx.robot.message_summary
-
-            visible_history_limit = getattr(ctx, 'specific_max_history', DEFAULT_CHAT_HISTORY)
-            try:
-                visible_history_limit = int(visible_history_limit)
-            except (TypeError, ValueError):
-                visible_history_limit = DEFAULT_CHAT_HISTORY
-            if visible_history_limit < 1:
-                visible_history_limit = DEFAULT_CHAT_HISTORY
-
-            history_lookup_tool = {
-                "type": "function",
-                "function": {
-                    "name": "lookup_chat_history",
-                    "description": (
-                        f"你目前只能看见最近的{visible_history_limit}条消息，所以不一定能设身处地地了解用户。"
-                        "和人交流的过程中，掌握更多的上下文是非常重要的，这可以保证你的回答有温度、真实且有价值。"
-                        "用户不会主动要求你去看上下文，但是你要自己判断需要看什么、看多少、看哪些上下文。"
-                        "请你在回答之前，尽可能地通过查看历史记录来了解用户或事情的全貌，而如果需要查看历史记录消息，那么就请调用此函数。\n"
-                        "调用时必须明确指定 mode（keywords / range / time），并按照以下说明提供参数：\n"
-                        "1. mode=\"keywords\"：最常用的模式，用于对关键词进行模糊检索，用户对某些消息进行更深入的理解，在历史记录中找到这些内容的上下文。需要提供 `keywords` 数组（2-4 个与核心相关的词或短语），系统会自动按最新匹配段落返回，函数的返回值中 `segments` 列表包含格式化的 \"时间 昵称 内容\" 行。\n"
-                        f"2. mode=\"range\"：用于获取某个倒数的区间内的连续消息块，用于快速找到最近的 n 条消息，只有在对**最近的**记录进行观察时使用。需要提供 `start_offset` 与 `end_offset`（均需 >{visible_history_limit}，且 end_offset ≥ start_offset）。偏移基于最新消息的倒数编号，例如 {visible_history_limit + 1}~{visible_history_limit + 90} 表示排除当前可见的消息后，再向前取更多历史。\n"
-                        "3. mode=\"time\"：次常用的模式，用于对某段时间内的消息进行检索，比如当提到昨晚、前天、昨天、今早上、上周、去年之类的具体时间的时候使用。需要提供 `start_time`、`end_time`（格式如 2025-05-01 08:00 或 2025-05-01 08:00:00），函数将返回该时间范围内的所有消息。若区间不符合用户需求，可再次调用调整时间。\n"
-                        "函数随时可以多次调用并组合使用：例如先用 keywords 找锚点，再用 range/time 取更大上下文。"
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "mode": {
-                                "type": "string",
-                                "description": "One of keywords, range, time.",
-                                "enum": ["keywords", "range", "time"]
-                            },
-                            "keywords": {
-                                "type": "array",
-                                "description": "Keywords for fuzzy search when mode=keywords.",
-                                "items": {"type": "string"}
-                            },
-                            "start_offset": {
-                                "type": "integer",
-                                "description": f"Smaller offset counted from the latest message (>{visible_history_limit}) when mode=range."
-                            },
-                            "end_offset": {
-                                "type": "integer",
-                                "description": f"Larger offset counted from the latest message (>{visible_history_limit}) when mode=range."
-                            },
-                            "start_time": {
-                                "type": "string",
-                                "description": "Start timestamp when mode=time (e.g., 2025-05-01 08:00[:00])."
-                            },
-                            "end_time": {
-                                "type": "string",
-                                "description": "End timestamp when mode=time (e.g., 2025-05-01 12:00[:00])."
-                            }
-                        },
-                        "additionalProperties": False
-                    }
-                }
-            }
-
-            def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
-                try:
-                    if tool_name != "lookup_chat_history":
-                        return json.dumps({"error": f"Unknown tool '{tool_name}'"}, ensure_ascii=False)
-
-                    mode = (arguments.get("mode") or "").strip().lower()
-                    keywords = arguments.get("keywords")
-                    start_offset = arguments.get("start_offset")
-                    end_offset = arguments.get("end_offset")
-                    start_time = arguments.get("start_time")
-                    end_time = arguments.get("end_time")
-
-                    inferred_mode = mode
-                    if not inferred_mode:
-                        if start_time and end_time:
-                            inferred_mode = "time"
-                        elif start_offset is not None and end_offset is not None:
-                            inferred_mode = "range"
-                        elif keywords:
-                            inferred_mode = "keywords"
-                        else:
-                            inferred_mode = "keywords"
-
-                    print(f"[lookup_chat_history] inferred_mode={inferred_mode}, raw_args={arguments}")
-                    if ctx.logger:
-                        ctx.logger.info(f"[lookup_chat_history] inferred_mode={inferred_mode}, raw_args={arguments}")
-
-                    if inferred_mode == "keywords":
-                        keywords = arguments.get("keywords", [])
-                        if isinstance(keywords, str):
-                            keywords = [keywords]
-                        elif not isinstance(keywords, list):
-                            keywords = []
-
-                        cleaned_keywords = []
-                        for kw in keywords:
-                            if kw is None:
-                                continue
-                            kw_str = str(kw).strip()
-                            if kw_str:
-                                if len(kw_str) == 1 and not kw_str.isdigit():
-                                    continue
-                                cleaned_keywords.append(kw_str)
-
-                        # 去重同时保持顺序
-                        seen = set()
-                        deduped_keywords = []
-                        for kw in cleaned_keywords:
-                            lower_kw = kw.lower()
-                            if lower_kw not in seen:
-                                seen.add(lower_kw)
-                                deduped_keywords.append(kw)
-
-                        if not deduped_keywords:
-                            return json.dumps({"error": "No valid keywords provided.", "results": []}, ensure_ascii=False)
-
-                        context_window = 10
-                        max_results = 20
-
-                        print(f"[search_chat_history] chat_id={chat_id}, keywords={deduped_keywords}, "
-                              f"context_window={context_window}, max_results={max_results}")
-                        if ctx.logger:
-                            ctx.logger.info(
-                                f"[search_chat_history] keywords={deduped_keywords}, "
-                                f"context_window={context_window}, max_results={max_results}"
-                            )
-
-                        search_results = message_summary.search_messages_with_context(
-                            chat_id=chat_id,
-                            keywords=deduped_keywords,
-                            context_window=context_window,
-                            max_groups=max_results,
-                            exclude_recent=visible_history_limit
-                        )
-
-                        segments = []
-                        lines_seen = set()
-                        for segment in search_results:
-                            formatted = []
-                            for line in segment.get("formatted_messages", []):
-                                if line not in lines_seen:
-                                    lines_seen.add(line)
-                                    formatted.append(line)
-                            if not formatted:
-                                continue
-                            segments.append({
-                                "matched_keywords": segment.get("matched_keywords", []),
-                                "messages": formatted
-                            })
-
-                        response_payload = {
-                            "segments": segments,
-                            "returned_groups": len(segments),
-                            "keywords": deduped_keywords
-                        }
-
-                        print(f"[search_chat_history] returned_groups={len(segments)}")
-                        if ctx.logger:
-                            ctx.logger.info(f"[search_chat_history] returned_groups={len(segments)}")
-
-                        if not segments:
-                            response_payload["notice"] = "No messages matched the provided keywords."
-
-                        return json.dumps(response_payload, ensure_ascii=False)
-
-                    elif inferred_mode == "range":
-                        if start_offset is None or end_offset is None:
-                            return json.dumps({"error": "start_offset and end_offset are required."}, ensure_ascii=False)
-
-                        try:
-                            start_offset = int(start_offset)
-                            end_offset = int(end_offset)
-                        except (TypeError, ValueError):
-                            return json.dumps({"error": "start_offset and end_offset must be integers."}, ensure_ascii=False)
-
-                        if start_offset <= visible_history_limit or end_offset <= visible_history_limit:
-                            return json.dumps(
-                                {"error": f"Offsets must be greater than {visible_history_limit} to avoid visible messages."},
-                                ensure_ascii=False
-                            )
-
-                        if start_offset > end_offset:
-                            start_offset, end_offset = end_offset, start_offset
-
-                        print(f"[fetch_chat_history_range] chat_id={chat_id}, start_offset={start_offset}, "
-                              f"end_offset={end_offset}")
-                        if ctx.logger:
-                            ctx.logger.info(
-                                f"[fetch_chat_history_range] start_offset={start_offset}, "
-                                f"end_offset={end_offset}"
-                            )
-
-                        range_result = message_summary.get_messages_by_reverse_range(
-                            chat_id=chat_id,
-                            start_offset=start_offset,
-                            end_offset=end_offset
-                        )
-
-                        response_payload = {
-                            "start_offset": range_result.get("start_offset"),
-                            "end_offset": range_result.get("end_offset"),
-                            "messages": range_result.get("messages", []),
-                            "returned_count": range_result.get("returned_count", 0),
-                            "total_messages": range_result.get("total_messages", 0)
-                        }
-
-                        print(f"[fetch_chat_history_range] returned_count={response_payload['returned_count']}")
-                        if ctx.logger:
-                            ctx.logger.info(
-                                f"[fetch_chat_history_range] returned_count={response_payload['returned_count']}"
-                            )
-
-                        if response_payload["returned_count"] == 0:
-                            response_payload["notice"] = "No messages available in the requested range."
-
-                        return json.dumps(response_payload, ensure_ascii=False)
-
-                    elif inferred_mode == "time":
-                        if not start_time or not end_time:
-                            return json.dumps({"error": "start_time and end_time are required."}, ensure_ascii=False)
-
-                        print(f"[fetch_chat_history_time_window] chat_id={chat_id}, start_time={start_time}, end_time={end_time}")
-                        if ctx.logger:
-                            ctx.logger.info(
-                                f"[fetch_chat_history_time_window] start_time={start_time}, end_time={end_time}"
-                            )
-
-                        time_lines = message_summary.get_messages_by_time_window(
-                            chat_id=chat_id,
-                            start_time=start_time,
-                            end_time=end_time
-                        )
-
-                        response_payload = {
-                            "start_time": start_time,
-                            "end_time": end_time,
-                            "messages": time_lines,
-                            "returned_count": len(time_lines)
-                        }
-
-                        print(f"[fetch_chat_history_time_window] returned_count={response_payload['returned_count']}")
-                        if ctx.logger:
-                            ctx.logger.info(
-                                f"[fetch_chat_history_time_window] returned_count={response_payload['returned_count']}"
-                            )
-
-                        if response_payload["returned_count"] == 0:
-                            response_payload["notice"] = "No messages found within the requested time window."
-
-                        return json.dumps(response_payload, ensure_ascii=False)
-
-                    else:
-                        return json.dumps({"error": f"Unsupported mode '{inferred_mode}'"}, ensure_ascii=False)
-
-                except Exception as tool_exc:
-                    if ctx.logger:
-                        ctx.logger.error(f"历史搜索工具调用失败: {tool_exc}", exc_info=True)
-                    return json.dumps(
-                        {"error": f"History tool failed: {tool_exc.__class__.__name__}"},
-                        ensure_ascii=False
-                    )
-
-            tools = [history_lookup_tool]
-            tool_handler = handle_tool_call
-
-        persona_text = getattr(ctx, 'persona', None)
-        system_prompt_override = None
-        if persona_text:
-            try:
-                system_prompt_override = build_persona_system_prompt(chat_model, persona_text)
-            except Exception as persona_exc:
-                if ctx.logger:
-                    ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
-                system_prompt_override = None
+            tool_names = [t["function"]["name"] for t in tools] if tools else []
+            ctx.logger.info(f"Agent 调用: tools={tool_names}")
 
         rsp = chat_model.get_answer(
-            question=latest_message_prompt, 
+            question=latest_message_prompt,
             wxid=ctx.get_receiver(),
             system_prompt_override=system_prompt_override,
             specific_max_history=specific_max_history,
             tools=tools,
             tool_handler=tool_handler,
-            tool_max_iterations=10
+            tool_max_iterations=10,
         )
-        
+
         if rsp:
             ctx.send_text(rsp, "")
             return True
@@ -474,8 +137,58 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
             return False
     except Exception as e:
         if ctx.logger:
-            ctx.logger.error(f"获取AI回复时出错: {e}")
+            ctx.logger.error(f"获取AI回复时出错: {e}", exc_info=True)
         return False
+
+
+def _handle_quoted_image(ctx, chat_model) -> bool:
+    """处理引用图片消息。"""
+    if ctx.logger:
+        ctx.logger.info("检测到引用图片消息，尝试处理图片内容...")
+
+    from ai_providers.ai_chatgpt import ChatGPT
+
+    support_vision = False
+    if isinstance(chat_model, ChatGPT):
+        if hasattr(chat_model, 'support_vision') and chat_model.support_vision:
+            support_vision = True
+        elif hasattr(chat_model, 'model'):
+            model_name = getattr(chat_model, 'model', '')
+            support_vision = model_name in ("gpt-4.1-mini", "gpt-4o") or "-vision" in model_name
+
+    if not support_vision:
+        ctx.send_text("抱歉，当前 AI 模型不支持处理图片。请联系管理员配置支持视觉的模型。")
+        return True
+
+    try:
+        temp_dir = "temp/image_cache"
+        os.makedirs(temp_dir, exist_ok=True)
+
+        image_path = ctx.wcf.download_image(
+            id=ctx.quoted_msg_id, extra=ctx.quoted_image_extra,
+            dir=temp_dir, timeout=30,
+        )
+
+        if not image_path or not os.path.exists(image_path):
+            ctx.send_text("抱歉，无法下载图片进行分析。")
+            return True
+
+        prompt = ctx.text if ctx.text and ctx.text.strip() else "请详细描述这张图片中的内容"
+        response = chat_model.get_image_description(image_path, prompt)
+        ctx.send_text(response)
+
+        try:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+        except Exception:
+            pass
+        return True
+
+    except Exception as e:
+        if ctx.logger:
+            ctx.logger.error(f"处理引用图片出错: {e}", exc_info=True)
+        ctx.send_text(f"处理图片时发生错误: {str(e)}")
+        return True
 
 def handle_perplexity_ask(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     """
