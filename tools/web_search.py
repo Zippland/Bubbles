@@ -42,6 +42,7 @@ tool_registry.register(Tool(
         "在网络上搜索信息。用于回答需要最新数据、实时信息或你不确定的事实性问题。"
         "deep_research 仅在问题非常复杂、需要深度研究时才开启。"
     ),
+    status_text="正在联网搜索: ",
     parameters={
         "type": "object",
         "properties": {

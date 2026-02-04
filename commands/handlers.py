@@ -105,12 +105,30 @@ def handle_chitchat(ctx: 'MessageContext', match: Optional[Match]) -> bool:
     # ── 构建系统提示 ──────────────────────────────────────
     persona_text = getattr(ctx, 'persona', None)
     system_prompt_override = None
+
+    # 工具使用指引：告诉 LLM 何时该用工具
+    tool_guidance = ""
+    if tools:
+        tool_guidance = (
+            "\n\n## 工具使用指引\n"
+            "你可以调用工具来辅助回答，以下是决策原则：\n"
+            "- 用户询问需要最新信息、实时数据、或你不确定的事实 → 调用 web_search\n"
+            "- 用户想设置/查看/删除提醒 → 调用 reminder_create / reminder_list / reminder_delete\n"
+            "- 用户提到之前聊过的内容、或你需要回顾更早的对话 → 调用 lookup_chat_history\n"
+            "- 日常闲聊、观点讨论、情感交流 → 直接回复，不需要调用任何工具\n"
+            "你可以在一次对话中多次调用工具（例如先搜索再设提醒），每次调用的结果会反馈给你继续推理。"
+        )
+
     if persona_text:
         try:
-            system_prompt_override = build_persona_system_prompt(chat_model, persona_text)
+            base_prompt = build_persona_system_prompt(chat_model, persona_text)
+            system_prompt_override = base_prompt + tool_guidance if base_prompt else tool_guidance or None
         except Exception as persona_exc:
             if ctx.logger:
                 ctx.logger.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
+            system_prompt_override = tool_guidance or None
+    elif tool_guidance:
+        system_prompt_override = tool_guidance
 
     # ── 调用 LLM（Agent 循环在 _execute_with_tools 中）──
     try:

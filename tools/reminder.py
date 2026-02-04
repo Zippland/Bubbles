@@ -106,6 +106,7 @@ tool_registry.register(Tool(
         "创建提醒。支持 once(一次性)、daily(每日)、weekly(每周) 三种类型。"
         "当前时间已在对话上下文中提供，请据此计算目标时间。"
     ),
+    status_text="正在设置提醒...",
     parameters={
         "type": "object",
         "properties": {

@@ -20,6 +20,7 @@ class Tool:
     description: str
     parameters: dict                          # JSON Schema
     handler: Callable[..., str] = None        # (ctx, **kwargs) -> str
+    status_text: str = ""                     # 执行前发给用户的状态提示，空则不发
 
     def to_openai_schema(self) -> dict:
         return {
@@ -54,8 +55,29 @@ class ToolRegistry:
         return [t.to_openai_schema() for t in self._tools.values()]
 
     def create_handler(self, ctx: Any) -> Callable[[str, dict], str]:
-        """创建一个绑定了消息上下文的 tool_handler 函数。"""
+        """创建一个绑定了消息上下文的 tool_handler 函数。
+
+        执行工具前，如果该工具配置了 status_text，会先给用户发一条状态提示，
+        让用户知道"机器人在干什么"（类似 OpenClaw/OpenCode 的中间过程输出）。
+        """
         registry = self._tools
+
+        def _send_status(tool: 'Tool', arguments: dict) -> None:
+            """发送工具执行状态消息给用户。"""
+            if not tool.status_text:
+                return
+            try:
+                # 对搜索类工具，把查询关键词带上
+                status = tool.status_text
+                if tool.name == "web_search" and arguments.get("query"):
+                    status = f"{status}{arguments['query']}"
+                elif tool.name == "lookup_chat_history" and arguments.get("keywords"):
+                    kw_str = "、".join(str(k) for k in arguments["keywords"][:3])
+                    status = f"{status}{kw_str}"
+
+                ctx.send_text(status, record_message=False)
+            except Exception:
+                pass  # 状态提示失败不影响工具执行
 
         def handler(tool_name: str, arguments: dict) -> str:
             tool = registry.get(tool_name)
@@ -64,6 +86,9 @@ class ToolRegistry:
                     {"error": f"Unknown tool: {tool_name}"},
                     ensure_ascii=False,
                 )
+
+            _send_status(tool, arguments)
+
             try:
                 result = tool.handler(ctx, **arguments)
                 if not isinstance(result, str):

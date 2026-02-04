@@ -142,6 +142,7 @@ def _handle_lookup_chat_history(ctx, mode: str = "", keywords: list = None,
 
 tool_registry.register(Tool(
     name="lookup_chat_history",
+    status_text="正在翻阅聊天记录: ",
     description=(
         "查询聊天历史记录。你当前只能看到最近的消息，调用此工具可以回溯更早的上下文。"
         "支持三种模式：\n"
