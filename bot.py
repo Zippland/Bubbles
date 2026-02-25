@@ -89,8 +89,13 @@ class BubblesBot:
         # 初始化 Agent Loop 系统
         self.tool_registry = create_default_registry()
         self.agent_loop = AgentLoop(self.tool_registry, max_iterations=20)
-        self.session_manager = SessionManager(self.message_summary, self.bot_id)
+        self.session_manager = SessionManager(
+            message_summary=self.message_summary,
+            bot_id=self.bot_id,
+            db_path=db_path,
+        )
         self.LOG.info(f"Agent Loop 系统已初始化，工具: {self.tool_registry.get_tool_names()}")
+        self.LOG.info(f"Session 管理器已初始化，已加载 {len(self.session_manager._cache)} 个 session")
 
     def _init_chat_models(self) -> None:
         """初始化所有 AI 模型"""
@@ -243,9 +248,24 @@ class BubblesBot:
         chat_id = msg.get_chat_id()
         content = msg.content
 
-        # 获取会话
-        session_key = f"{self.channel.name}:{chat_id}"
-        session = self.session_manager.get_or_create(session_key, max_history=30)
+        # 处理 session 命令
+        if content.startswith("/session"):
+            await self._handle_session_command(msg, content)
+            return
+
+        # 获取会话（通过别名解析，支持跨 Channel 统一会话）
+        session_alias = f"{self.channel.name}:{chat_id}"
+        session = self.session_manager.get_or_create(session_alias)
+
+        # 从 session 配置获取设置
+        session_config = session.config
+        max_history = session_config.max_history or 30
+
+        # 选择模型（优先使用 session 绑定的模型）
+        chat_model = self.chat
+        if session_config.model_id is not None and session_config.model_id in self.chat_models:
+            chat_model = self.chat_models[session_config.model_id]
+            self.LOG.debug(f"使用 session 绑定的模型: {session_config.model_id}")
 
         # 构建用户消息
         current_time = time_mod.strftime("%H:%M", time_mod.localtime())
@@ -261,16 +281,19 @@ class BubblesBot:
             "- 日常闲聊、观点讨论、情感交流 → 直接回复，不需要调用任何工具\n"
         )
 
-        # 获取人设
-        persona_text = None
-        if self.persona_manager:
+        # 获取人设（优先使用 session 绑定的，其次从 persona_manager）
+        persona_text = session_config.persona
+        if not persona_text and self.persona_manager:
             try:
                 persona_text = self.persona_manager.get_persona(chat_id)
             except Exception:
                 pass
 
-        if persona_text:
-            system_prompt = build_persona_system_prompt(self.chat, persona_text) + tool_guidance
+        # 获取 system prompt（优先使用 session 绑定的）
+        if session_config.system_prompt:
+            system_prompt = session_config.system_prompt + tool_guidance
+        elif persona_text:
+            system_prompt = build_persona_system_prompt(chat_model, persona_text) + tool_guidance
         else:
             system_prompt = tool_guidance
 
@@ -283,7 +306,7 @@ class BubblesBot:
         messages.append({"role": "system", "content": f"Current time is: {now_time}"})
 
         # 添加历史消息
-        history = session.get_history(30)
+        history = session.get_history(max_history)
         for hist_msg in history:
             role = hist_msg.get("role", "user")
             hist_content = hist_msg.get("content", "")
@@ -320,14 +343,13 @@ class BubblesBot:
             robot=self,
             logger=self.LOG,
             config=self.config,
-            specific_max_history=30,
+            specific_max_history=max_history,
             persona=persona_text,
             _send_text_func=send_func,
         )
 
         # 执行 Agent Loop
         try:
-            chat_model = self.chat
             if not chat_model:
                 await self.channel.send_text("抱歉，没有可用的 AI 模型。", chat_id)
                 return
@@ -357,6 +379,103 @@ class BubblesBot:
         except Exception as e:
             self.LOG.error(f"Agent Loop 执行失败: {e}", exc_info=True)
             await self.channel.send_text("抱歉，处理消息时出错了。", chat_id)
+
+    async def _handle_session_command(self, msg: Message, content: str) -> None:
+        """处理 session 相关命令
+
+        命令格式:
+            /session bind <session_key>  - 绑定当前会话到指定 session
+            /session unbind              - 解除当前会话的绑定
+            /session info                - 查看当前 session 信息
+            /session list                - 列出所有 session
+            /session model <model_id>    - 设置当前 session 的模型
+            /session clear               - 清空当前 session 的消息历史
+        """
+        chat_id = msg.get_chat_id()
+        alias = f"{self.channel.name}:{chat_id}"
+        parts = content.split()
+
+        if len(parts) < 2:
+            await self.channel.send_text(
+                "用法:\n"
+                "  /session bind <key> - 绑定到 session\n"
+                "  /session unbind - 解除绑定\n"
+                "  /session info - 查看信息\n"
+                "  /session list - 列出所有\n"
+                "  /session model <id> - 设置模型\n"
+                "  /session clear - 清空历史",
+                chat_id,
+            )
+            return
+
+        cmd = parts[1].lower()
+
+        if cmd == "bind" and len(parts) >= 3:
+            session_key = parts[2]
+            session = self.session_manager.bind(session_key, alias)
+            await self.channel.send_text(
+                f"已绑定到 session: {session_key}\n"
+                f"别名: {', '.join(session.aliases)}",
+                chat_id,
+            )
+
+        elif cmd == "unbind":
+            if self.session_manager.unbind(alias):
+                await self.channel.send_text("已解除绑定", chat_id)
+            else:
+                await self.channel.send_text("当前会话未绑定到任何 session", chat_id)
+
+        elif cmd == "info":
+            session = self.session_manager.get(alias)
+            if session:
+                model_name = "默认"
+                if session.config.model_id is not None:
+                    model = self.chat_models.get(session.config.model_id)
+                    model_name = model.__class__.__name__ if model else f"ID:{session.config.model_id}"
+
+                info = (
+                    f"Session Key: {session.key}\n"
+                    f"别名: {', '.join(session.aliases) or '无'}\n"
+                    f"模型: {model_name}\n"
+                    f"历史限制: {session.config.max_history}\n"
+                    f"消息数: {len(session.messages)}\n"
+                    f"人设: {'已设置' if session.config.persona else '未设置'}"
+                )
+                await self.channel.send_text(info, chat_id)
+            else:
+                await self.channel.send_text("当前会话未创建 session", chat_id)
+
+        elif cmd == "list":
+            sessions = self.session_manager.list_sessions()
+            if sessions:
+                lines = ["所有 Session:"]
+                for s in sessions:
+                    aliases = ", ".join(s["aliases"]) if s["aliases"] else "无别名"
+                    lines.append(f"  {s['key']} ({aliases}) - {s['message_count']} 条消息")
+                await self.channel.send_text("\n".join(lines), chat_id)
+            else:
+                await self.channel.send_text("暂无 session", chat_id)
+
+        elif cmd == "model" and len(parts) >= 3:
+            try:
+                model_id = int(parts[2])
+                if model_id in self.chat_models:
+                    self.session_manager.set_config(alias, model_id=model_id)
+                    model_name = self.chat_models[model_id].__class__.__name__
+                    await self.channel.send_text(f"已设置模型: {model_name}", chat_id)
+                else:
+                    available = ", ".join(str(k) for k in self.chat_models.keys())
+                    await self.channel.send_text(f"无效的模型 ID，可用: {available}", chat_id)
+            except ValueError:
+                await self.channel.send_text("模型 ID 必须是数字", chat_id)
+
+        elif cmd == "clear":
+            session = self.session_manager.get_or_create(alias)
+            session.clear()
+            await self.channel.send_text("已清空消息历史", chat_id)
+
+        else:
+            await self.channel.send_text(f"未知命令: {cmd}", chat_id)
 
     def cleanup(self) -> None:
         """清理资源"""

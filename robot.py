@@ -297,8 +297,13 @@ class Robot(Job):
         # 初始化 Agent Loop 系统
         self.tool_registry = create_default_registry()
         self.agent_loop = AgentLoop(self.tool_registry, max_iterations=20)
-        self.session_manager = SessionManager(self.message_summary, self.wxid)
+        self.session_manager = SessionManager(
+            message_summary=self.message_summary,
+            bot_id=self.wxid,
+            db_path=db_path,
+        )
         self.LOG.info(f"Agent Loop 系统已初始化，工具: {self.tool_registry.get_tool_names()}")
+        self.LOG.info(f"Session 管理器已初始化，已加载 {len(self.session_manager._cache)} 个 session")
         
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -659,8 +664,23 @@ class Robot(Job):
         reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
         is_auto_random_reply = bool(getattr(ctx, 'auto_random_reply', False))
 
-        # 选择模型
+        # 获取或创建会话（通过别名解析，支持跨 Channel 统一会话）
+        chat_id = ctx.get_receiver()
+        session_alias = f"wechat:{chat_id}"
+        specific_max_history = getattr(ctx, 'specific_max_history', 30) or 30
+        session = self.session_manager.get_or_create(session_alias, max_history=specific_max_history)
+
+        # 从 session 配置获取设置
+        session_config = session.config
+        if session_config.max_history:
+            specific_max_history = session_config.max_history
+
+        # 选择模型（优先使用 session 绑定的模型，其次是上下文指定的）
         chat_model = getattr(ctx, 'chat', None) or self.chat
+        if session_config.model_id is not None and session_config.model_id in self.chat_models:
+            chat_model = self.chat_models[session_config.model_id]
+            self.LOG.debug(f"使用 session 绑定的模型: {session_config.model_id}")
+
         if reasoning_requested:
             if force_reasoning:
                 self.LOG.info("群配置了 force_reasoning，将使用推理模型。")
@@ -677,16 +697,6 @@ class Robot(Job):
             self.LOG.error("没有可用的AI模型")
             await self.send_text_async("抱歉，我现在无法进行对话。", ctx.get_receiver())
             return False
-
-        # 获取历史消息限制
-        specific_max_history = getattr(ctx, 'specific_max_history', 30)
-        if specific_max_history is None:
-            specific_max_history = 30
-
-        # 获取或创建会话
-        chat_id = ctx.get_receiver()
-        session_key = f"wechat:{chat_id}"
-        session = self.session_manager.get_or_create(session_key, max_history=specific_max_history)
 
         # 构建用户消息
         sender_name = ctx.sender_name
@@ -723,8 +733,8 @@ class Robot(Job):
                 "请只针对该用户进行回复。"
             )
 
-        # 构建系统提示
-        persona_text = getattr(ctx, 'persona', None)
+        # 构建系统提示（优先使用 session 配置）
+        persona_text = session_config.persona or getattr(ctx, 'persona', None)
         tool_guidance = ""
         if not is_auto_random_reply:
             tool_guidance = (
@@ -737,7 +747,10 @@ class Robot(Job):
                 "你可以在一次对话中多次调用工具。"
             )
 
-        if persona_text:
+        # 优先使用 session 绑定的 system_prompt
+        if session_config.system_prompt:
+            system_prompt = session_config.system_prompt + tool_guidance
+        elif persona_text:
             try:
                 base_prompt = build_persona_system_prompt(chat_model, persona_text)
                 system_prompt = base_prompt + tool_guidance if base_prompt else tool_guidance or None
