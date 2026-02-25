@@ -97,6 +97,9 @@ class BubblesBot:
         self.LOG.info(f"Agent Loop 系统已初始化，工具: {self.tool_registry.get_tool_names()}")
         self.LOG.info(f"Session 管理器已初始化，已加载 {len(self.session_manager._cache)} 个 session")
 
+        # 配置流程状态
+        self._setup_state: dict[str, dict] = {}
+
     def _init_chat_models(self) -> None:
         """初始化所有 AI 模型"""
         self.LOG.info("开始初始化 AI 模型...")
@@ -247,14 +250,33 @@ class BubblesBot:
 
         chat_id = msg.get_chat_id()
         content = msg.content
+        session_alias = f"{self.channel.name}:{chat_id}"
 
         # 处理 session 命令
         if content.startswith("/session"):
             await self._handle_session_command(msg, content)
             return
 
+        # 处理配置流程中的输入
+        if await self._handle_setup_input(msg):
+            return
+
+        # 检查是否是新 session，引导配置
+        session = self.session_manager.get(session_alias)
+        if session is None:
+            # 首次对话，询问是否配置
+            await self.channel.send_text(
+                f"你好！我是 Bubbles 🫧\n\n"
+                f"这是我们第一次对话，要先配置一下吗？\n"
+                f"• 输入 /session setup 开始配置\n"
+                f"• 或者直接对话（使用默认设置）",
+                chat_id,
+            )
+            # 创建默认 session
+            session = self.session_manager.get_or_create(session_alias)
+            return
+
         # 获取会话（通过别名解析，支持跨 Channel 统一会话）
-        session_alias = f"{self.channel.name}:{chat_id}"
         session = self.session_manager.get_or_create(session_alias)
 
         # 从 session 配置获取设置
@@ -381,28 +403,19 @@ class BubblesBot:
             await self.channel.send_text("抱歉，处理消息时出错了。", chat_id)
 
     async def _handle_session_command(self, msg: Message, content: str) -> None:
-        """处理 session 相关命令
-
-        命令格式:
-            /session bind <session_key>  - 绑定当前会话到指定 session
-            /session unbind              - 解除当前会话的绑定
-            /session info                - 查看当前 session 信息
-            /session list                - 列出所有 session
-            /session model <model_id>    - 设置当前 session 的模型
-            /session clear               - 清空当前 session 的消息历史
-        """
+        """处理 session 相关命令"""
         chat_id = msg.get_chat_id()
         alias = f"{self.channel.name}:{chat_id}"
-        parts = content.split()
+        parts = content.split(maxsplit=2)
 
         if len(parts) < 2:
             await self.channel.send_text(
-                "用法:\n"
-                "  /session bind <key> - 绑定到 session\n"
-                "  /session unbind - 解除绑定\n"
+                "Session 命令:\n"
+                "  /session setup - 交互式配置\n"
                 "  /session info - 查看信息\n"
-                "  /session list - 列出所有\n"
                 "  /session model <id> - 设置模型\n"
+                "  /session persona <文本> - 设置人设\n"
+                "  /session bind <key> - 绑定到 session\n"
                 "  /session clear - 清空历史",
                 chat_id,
             )
@@ -410,7 +423,10 @@ class BubblesBot:
 
         cmd = parts[1].lower()
 
-        if cmd == "bind" and len(parts) >= 3:
+        if cmd == "setup":
+            await self._start_session_setup(msg)
+
+        elif cmd == "bind" and len(parts) >= 3:
             session_key = parts[2]
             session = self.session_manager.bind(session_key, alias)
             await self.channel.send_text(
@@ -423,7 +439,7 @@ class BubblesBot:
             if self.session_manager.unbind(alias):
                 await self.channel.send_text("已解除绑定", chat_id)
             else:
-                await self.channel.send_text("当前会话未绑定到任何 session", chat_id)
+                await self.channel.send_text("当前会话未绑定", chat_id)
 
         elif cmd == "info":
             session = self.session_manager.get(alias)
@@ -434,24 +450,24 @@ class BubblesBot:
                     model_name = model.__class__.__name__ if model else f"ID:{session.config.model_id}"
 
                 info = (
-                    f"Session Key: {session.key}\n"
+                    f"Session: {session.key}\n"
                     f"别名: {', '.join(session.aliases) or '无'}\n"
                     f"模型: {model_name}\n"
-                    f"历史限制: {session.config.max_history}\n"
+                    f"历史: {session.config.max_history} 条\n"
                     f"消息数: {len(session.messages)}\n"
                     f"人设: {'已设置' if session.config.persona else '未设置'}"
                 )
                 await self.channel.send_text(info, chat_id)
             else:
-                await self.channel.send_text("当前会话未创建 session", chat_id)
+                await self.channel.send_text("当前会话未配置，发送 /session setup 开始配置", chat_id)
 
         elif cmd == "list":
             sessions = self.session_manager.list_sessions()
             if sessions:
                 lines = ["所有 Session:"]
                 for s in sessions:
-                    aliases = ", ".join(s["aliases"]) if s["aliases"] else "无别名"
-                    lines.append(f"  {s['key']} ({aliases}) - {s['message_count']} 条消息")
+                    aliases = ", ".join(s["aliases"]) if s["aliases"] else "无"
+                    lines.append(f"  {s['key']} ({aliases})")
                 await self.channel.send_text("\n".join(lines), chat_id)
             else:
                 await self.channel.send_text("暂无 session", chat_id)
@@ -465,9 +481,14 @@ class BubblesBot:
                     await self.channel.send_text(f"已设置模型: {model_name}", chat_id)
                 else:
                     available = ", ".join(str(k) for k in self.chat_models.keys())
-                    await self.channel.send_text(f"无效的模型 ID，可用: {available}", chat_id)
+                    await self.channel.send_text(f"无效 ID，可用: {available}", chat_id)
             except ValueError:
                 await self.channel.send_text("模型 ID 必须是数字", chat_id)
+
+        elif cmd == "persona" and len(parts) >= 3:
+            persona_text = parts[2]
+            self.session_manager.set_config(alias, persona=persona_text)
+            await self.channel.send_text(f"人设已设置", chat_id)
 
         elif cmd == "clear":
             session = self.session_manager.get_or_create(alias)
@@ -476,6 +497,145 @@ class BubblesBot:
 
         else:
             await self.channel.send_text(f"未知命令: {cmd}", chat_id)
+
+    async def _start_session_setup(self, msg: Message) -> None:
+        """开始交互式 session 配置"""
+        chat_id = msg.get_chat_id()
+        alias = f"{self.channel.name}:{chat_id}"
+
+        # 标记进入配置模式
+        self._setup_state[alias] = {"step": "model"}
+
+        # 构建模型选项
+        model_options = []
+        for model_id, model in self.chat_models.items():
+            model_options.append(f"  {model_id} - {model.__class__.__name__}")
+
+        await self.channel.send_text(
+            "开始配置 Session\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "第 1 步：选择 AI 模型\n\n"
+            "可用模型:\n" + "\n".join(model_options) + "\n\n"
+            "请输入模型编号（或输入 skip 跳过使用默认）:",
+            chat_id,
+        )
+
+    async def _handle_setup_input(self, msg: Message) -> bool:
+        """处理配置流程的输入，返回是否已处理"""
+        chat_id = msg.get_chat_id()
+        alias = f"{self.channel.name}:{chat_id}"
+
+        if alias not in self._setup_state:
+            return False
+
+        state = self._setup_state[alias]
+        content = msg.content.strip()
+        step = state.get("step")
+
+        if content.lower() == "cancel":
+            del self._setup_state[alias]
+            await self.channel.send_text("配置已取消", chat_id)
+            return True
+
+        if step == "model":
+            if content.lower() == "skip":
+                state["model_id"] = None
+            else:
+                try:
+                    model_id = int(content)
+                    if model_id not in self.chat_models:
+                        await self.channel.send_text("无效的模型编号，请重新输入:", chat_id)
+                        return True
+                    state["model_id"] = model_id
+                except ValueError:
+                    await self.channel.send_text("请输入数字编号:", chat_id)
+                    return True
+
+            state["step"] = "history"
+            await self.channel.send_text(
+                "第 2 步：历史消息数量\n\n"
+                "AI 回复时会参考最近多少条消息？\n"
+                "建议: 20-50 条\n\n"
+                "请输入数字（或 skip 使用默认 30）:",
+                chat_id,
+            )
+            return True
+
+        elif step == "history":
+            if content.lower() == "skip":
+                state["max_history"] = 30
+            else:
+                try:
+                    state["max_history"] = max(5, min(200, int(content)))
+                except ValueError:
+                    await self.channel.send_text("请输入数字:", chat_id)
+                    return True
+
+            state["step"] = "persona"
+            await self.channel.send_text(
+                "第 3 步：设置人设（可选）\n\n"
+                "给 AI 一个性格或角色设定，例如:\n"
+                "「你是一个幽默风趣的助手，喜欢用表情包」\n"
+                "「你是一位专业的程序员，擅长 Python」\n\n"
+                "请输入人设文本（或 skip 跳过）:",
+                chat_id,
+            )
+            return True
+
+        elif step == "persona":
+            if content.lower() != "skip":
+                state["persona"] = content
+            else:
+                state["persona"] = None
+
+            state["step"] = "name"
+            await self.channel.send_text(
+                "第 4 步：Session 名称（可选）\n\n"
+                "给这个会话起个名字，方便跨设备同步。\n"
+                "例如: work、personal、coding\n\n"
+                "请输入名称（或 skip 使用默认）:",
+                chat_id,
+            )
+            return True
+
+        elif step == "name":
+            # 完成配置
+            session_key = alias
+            if content.lower() != "skip" and content:
+                session_key = f"user:{content}"
+                self.session_manager.bind(session_key, alias)
+
+            # 应用配置
+            self.session_manager.set_config(
+                alias,
+                model_id=state.get("model_id"),
+                max_history=state.get("max_history", 30),
+                persona=state.get("persona"),
+            )
+
+            # 清理状态
+            del self._setup_state[alias]
+
+            # 显示配置结果
+            session = self.session_manager.get(alias)
+            model_name = "默认"
+            if state.get("model_id") is not None:
+                model = self.chat_models.get(state["model_id"])
+                model_name = model.__class__.__name__ if model else "未知"
+
+            await self.channel.send_text(
+                "配置完成！\n"
+                "━━━━━━━━━━━━━━━━\n"
+                f"Session: {session.key}\n"
+                f"模型: {model_name}\n"
+                f"历史: {state.get('max_history', 30)} 条\n"
+                f"人设: {'已设置' if state.get('persona') else '未设置'}\n\n"
+                "现在可以开始对话了！",
+                chat_id,
+            )
+            return True
+
+        return False
 
     def cleanup(self) -> None:
         """清理资源"""
