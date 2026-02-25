@@ -2,13 +2,10 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, TYPE_CHECKING
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from commands.context import MessageContext
-    from robot import Robot
 
 PERSONA_PREFIX = "## 角色\n"
 
@@ -123,7 +120,7 @@ class PersonaManager:
                 self.LOG.error(f"Failed to close persona database connection: {exc}")
 
 
-def fetch_persona_for_context(robot: "Robot", ctx: "MessageContext") -> Optional[str]:
+def fetch_persona_for_context(robot: Any, ctx: "MessageContext") -> Optional[str]:
     """Return persona text for the context receiver."""
     manager = getattr(robot, "persona_manager", None)
     if not manager:
@@ -138,7 +135,7 @@ def fetch_persona_for_context(robot: "Robot", ctx: "MessageContext") -> Optional
         return None
 
 
-def handle_persona_command(robot: "Robot", ctx: "MessageContext") -> bool:
+def handle_persona_command(robot: Any, ctx: "MessageContext") -> bool:
     """Process /set and /persona commands."""
     text = (ctx.text or "").strip()
     if not text or not text.startswith("/"):

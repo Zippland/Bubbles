@@ -619,6 +619,20 @@ class BubblesBot:
 
         return False
 
+    def sendTextMsg(self, msg: str, receiver: str, at_list: str = "") -> None:
+        """同步发送消息（兼容旧接口，供 ReminderManager 使用）"""
+        import asyncio
+
+        async def _send():
+            at_users = at_list.split(",") if at_list else None
+            await self.channel.send_text(msg, receiver, at_users)
+
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.create_task(_send())
+        except RuntimeError:
+            asyncio.run(_send())
+
     def cleanup(self) -> None:
         """清理资源"""
         self.LOG.info("正在清理 BubblesBot 资源...")
