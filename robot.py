@@ -34,7 +34,7 @@ from function.func_xml_process import XmlProcessor
 
 # 导入上下文及常用处理函数
 from commands.context import MessageContext
-from commands.handlers import handle_chitchat  # 保留旧接口用于兼容
+# 旧的 handle_chitchat 已被 _handle_chitchat_async 取代
 from commands.keyword_triggers import KeywordTriggerProcessor
 from commands.message_forwarder import MessageForwarder
 
@@ -651,6 +651,10 @@ class Robot(Job):
 
     async def _handle_chitchat_async(self, ctx, auto_random_reply: bool = False) -> bool:
         """异步处理闲聊 - 使用 Agent Loop 架构"""
+        # 引用图片特殊处理
+        if getattr(ctx, 'is_quoted_image', False):
+            return await self._handle_quoted_image_async(ctx)
+
         force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
         reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
         is_auto_random_reply = bool(getattr(ctx, 'auto_random_reply', False))
@@ -817,66 +821,60 @@ class Robot(Job):
                 await self.send_text_async("抱歉，服务暂时不可用，请稍后再试。", chat_id)
             return False
 
-    def _handle_chitchat(self, ctx, match=None):
-        """同步版本 - 保持向后兼容，内部调用旧逻辑"""
-        force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
-        reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
-        original_chat = getattr(ctx, 'chat', None)
+    async def _handle_quoted_image_async(self, ctx) -> bool:
+        """异步处理引用图片消息"""
+        import os
 
-        if reasoning_requested:
-            if force_reasoning:
-                self.LOG.info("群配置了 force_reasoning，将使用推理模型。")
-            else:
-                self.LOG.info("检测到推理模式请求，将启用深度思考。")
-                ctx.send_text("正在深度思考，请稍候...", record_message=False)
-            reasoning_chat = self._get_reasoning_chat_model()
-            if reasoning_chat:
-                ctx.chat = reasoning_chat
-            else:
-                self.LOG.warning("当前模型未配置推理模型，使用默认模型")
+        self.LOG.info("检测到引用图片消息，尝试处理图片内容...")
 
-        # 构建候选模型列表：当前模型 + fallback
-        primary_id = getattr(self, 'current_model_id', None)
-        fallback_ids = self._get_fallback_model_ids()
-        candidate_ids = []
-        if primary_id is not None:
-            candidate_ids.append(primary_id)
-        for fid in fallback_ids:
-            if fid not in candidate_ids and fid in self.chat_models:
-                candidate_ids.append(fid)
+        chat_model = getattr(ctx, 'chat', None) or self.chat
+        support_vision = False
 
-        handled = False
-        for i, model_id in enumerate(candidate_ids):
-            if i > 0:
-                # 切换到 fallback 模型
-                fallback_model = self.chat_models[model_id]
-                if reasoning_requested:
-                    fallback_reasoning = self.reasoning_chat_models.get(model_id)
-                    ctx.chat = fallback_reasoning or fallback_model
-                else:
-                    ctx.chat = fallback_model
-                model_name = getattr(ctx.chat, '__class__', type(ctx.chat)).__name__
-                self.LOG.info(f"Fallback: 切换到模型 {model_name}(ID:{model_id})")
+        if isinstance(chat_model, ChatGPT):
+            if hasattr(chat_model, 'support_vision') and chat_model.support_vision:
+                support_vision = True
+            elif hasattr(chat_model, 'model'):
+                model_name = getattr(chat_model, 'model', '')
+                support_vision = model_name in ("gpt-4.1-mini", "gpt-4o") or "-vision" in model_name
+
+        if not support_vision:
+            await self.send_text_async(
+                "抱歉，当前 AI 模型不支持处理图片。请联系管理员配置支持视觉的模型。",
+                ctx.get_receiver()
+            )
+            return True
+
+        try:
+            temp_dir = "temp/image_cache"
+            os.makedirs(temp_dir, exist_ok=True)
+
+            image_path = await asyncio.to_thread(
+                ctx.wcf.download_image,
+                id=ctx.quoted_msg_id,
+                extra=ctx.quoted_image_extra,
+                dir=temp_dir,
+                timeout=30
+            )
+
+            if not image_path or not os.path.exists(image_path):
+                await self.send_text_async("抱歉，无法下载图片进行分析。", ctx.get_receiver())
+                return True
+
+            prompt = ctx.text if ctx.text and ctx.text.strip() else "请详细描述这张图片中的内容"
+            response = await asyncio.to_thread(chat_model.get_image_description, image_path, prompt)
+            await self.send_text_async(response, ctx.get_receiver())
 
             try:
-                handled = handle_chitchat(ctx, match)
-                if handled:
-                    break
-            except Exception as e:
-                self.LOG.warning(f"模型 {model_id} 调用失败: {e}")
-                continue
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+            except Exception:
+                pass
+            return True
 
-        # 恢复原始模型
-        if original_chat is not None:
-            ctx.chat = original_chat
-
-        if not handled:
-            if reasoning_requested:
-                ctx.send_text("抱歉，深度思考暂时遇到问题，请稍后再试。")
-            else:
-                ctx.send_text("抱歉，服务暂时不可用，请稍后再试。")
-
-        return handled
+        except Exception as e:
+            self.LOG.error(f"处理引用图片出错: {e}", exc_info=True)
+            await self.send_text_async(f"处理图片时发生错误: {str(e)}", ctx.get_receiver())
+            return True
 
     def _describe_chat_model(self, chat_model, reasoning: bool = False) -> str:
         """根据配置返回模型名称，默认回退到实例类名"""
