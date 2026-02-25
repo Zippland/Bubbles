@@ -2,6 +2,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import asyncio
 import logging
 import base64
 import os
@@ -18,8 +19,10 @@ try:
 except ImportError:
     MessageSummary = object # Fallback if import fails or for simplified typing
 
+from providers.base import LLMProvider, LLMResponse, ToolCall
 
-class ChatGPT():
+
+class ChatGPT(LLMProvider):
     def __init__(self, conf: dict, message_summary_instance: MessageSummary = None, bot_wxid: str = None) -> None:
         key = conf.get("key")
         api = conf.get("api")
@@ -233,6 +236,59 @@ class ChatGPT():
                 response_text = response_text[2:]
             response_text = response_text.replace("\n\n", "\n")
             return response_text
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """异步调用 LLM（实现 LLMProvider 接口）
+
+        Args:
+            messages: OpenAI 格式的消息列表
+            tools: OpenAI 格式的工具定义列表
+
+        Returns:
+            LLMResponse: 包含响应内容和可能的工具调用
+        """
+        params = {"model": self.model, "messages": messages}
+        if tools:
+            params["tools"] = tools
+
+        try:
+            # 在线程中执行同步 API 调用
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create, **params
+            )
+            choice = response.choices[0]
+            message = choice.message
+
+            # 解析工具调用
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    try:
+                        arguments = json.loads(tc.function.arguments or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {"_raw": tc.function.arguments}
+                    tool_calls.append(
+                        ToolCall(id=tc.id, name=tc.function.name, arguments=arguments)
+                    )
+
+            content = message.content
+            if content and content.startswith("\n\n"):
+                content = content[2:]
+            if content:
+                content = content.replace("\n\n", "\n")
+
+            return LLMResponse(content=content, tool_calls=tool_calls)
+
+        except (AuthenticationError, APIConnectionError, APIError) as e:
+            self.LOG.error(f"ChatGPT API 调用失败: {e}")
+            raise
+        except Exception as e:
+            self.LOG.error(f"ChatGPT 未知错误: {e}", exc_info=True)
+            raise
 
     def encode_image_to_base64(self, image_path: str) -> str:
         """将图片文件转换为Base64编码

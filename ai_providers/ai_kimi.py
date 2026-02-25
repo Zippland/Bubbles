@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import asyncio
 import json
 import logging
 import time
@@ -14,8 +15,10 @@ try:
 except ImportError:  # pragma: no cover - fallback when typing
     MessageSummary = object
 
+from providers.base import LLMProvider, LLMResponse, ToolCall
 
-class Kimi:
+
+class Kimi(LLMProvider):
     """Moonshot Kimi provider (兼容OpenAI SDK)"""
 
     def __init__(self, conf: dict, message_summary_instance: MessageSummary = None, bot_wxid: str = None) -> None:
@@ -263,6 +266,56 @@ class Kimi:
             return "\n".join(segments).strip()
 
         return _normalize_segment(raw_reasoning).strip()
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """异步调用 LLM（实现 LLMProvider 接口）"""
+        params = {"model": self.model, "messages": messages}
+        if tools:
+            params["tools"] = tools
+
+        try:
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create, **params
+            )
+            choice = response.choices[0]
+            message = choice.message
+
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    try:
+                        arguments = json.loads(tc.function.arguments or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {"_raw": tc.function.arguments}
+                    tool_calls.append(
+                        ToolCall(id=tc.id, name=tc.function.name, arguments=arguments)
+                    )
+
+            content = message.content
+            if content and content.startswith("\n\n"):
+                content = content[2:]
+            if content:
+                content = content.replace("\n\n", "\n")
+
+            # 提取推理内容
+            reasoning_content = self._extract_reasoning_text(message)
+
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+            )
+
+        except (AuthenticationError, APIConnectionError, APIError) as e:
+            self.LOG.error(f"Kimi API 调用失败: {e}")
+            raise
+        except Exception as e:
+            self.LOG.error(f"Kimi 未知错误: {e}", exc_info=True)
+            raise
 
 
 __all__ = ["Kimi"]

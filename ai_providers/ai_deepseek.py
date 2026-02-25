@@ -2,6 +2,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import asyncio
 import logging
 from datetime import datetime
 import time # 引入 time 模块
@@ -16,7 +17,10 @@ try:
 except ImportError:
     MessageSummary = object
 
-class DeepSeek():
+from providers.base import LLMProvider, LLMResponse, ToolCall
+
+
+class DeepSeek(LLMProvider):
     def __init__(self, conf: dict, message_summary_instance: MessageSummary = None, bot_wxid: str = None) -> None:
         key = conf.get("key")
         api = conf.get("api", "https://api.deepseek.com")
@@ -218,6 +222,43 @@ class DeepSeek():
                 continue
 
             return message.content if message and message.content else ""
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """异步调用 LLM（实现 LLMProvider 接口）"""
+        params = {"model": self.model, "messages": messages, "stream": False}
+        if tools:
+            params["tools"] = tools
+
+        try:
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create, **params
+            )
+            choice = response.choices[0]
+            message = choice.message
+
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    try:
+                        arguments = json.loads(tc.function.arguments or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {"_raw": tc.function.arguments}
+                    tool_calls.append(
+                        ToolCall(id=tc.id, name=tc.function.name, arguments=arguments)
+                    )
+
+            return LLMResponse(content=message.content, tool_calls=tool_calls)
+
+        except (AuthenticationError, APIConnectionError, APIError) as e:
+            self.LOG.error(f"DeepSeek API 调用失败: {e}")
+            raise
+        except Exception as e:
+            self.LOG.error(f"DeepSeek 未知错误: {e}", exc_info=True)
+            raise
 
 
 if __name__ == "__main__":

@@ -1,9 +1,20 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Bubbles WeChat Robot - Agent Loop 架构
+版本 39.3.0.0
 
+主要改进：
+- 全异步架构 (async/await)
+- Agent Loop 模式处理消息
+- 统一的 LLMProvider 接口
+- 独立的 Session 管理
+"""
+
+import asyncio
 import signal
 import logging
-import sys  # 导入 sys 模块
+import sys
 import os
 from argparse import ArgumentParser
 
@@ -34,6 +45,8 @@ logging.getLogger("ai_providers").setLevel(logging.WARNING)
 logging.getLogger("commands").setLevel(logging.WARNING)
 # 临时调试：为AI路由器设置更详细的日志级别
 logging.getLogger("commands.ai_router").setLevel(logging.INFO)
+# Agent Loop 日志
+logging.getLogger("agent").setLevel(logging.INFO)
 
 from configuration import Config
 from constants import ChatType

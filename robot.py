@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 
+import asyncio
 import logging
 import re
-import time
+import time as time_mod
 import xml.etree.ElementTree as ET
 from queue import Empty
 from threading import Thread
@@ -18,13 +19,14 @@ from ai_providers.ai_kimi import Kimi
 from ai_providers.ai_perplexity import Perplexity
 from function.func_weather import Weather
 from function.func_news import News
-from function.func_summary import MessageSummary  # 导入新的MessageSummary类
-from function.func_reminder import ReminderManager  # 导入ReminderManager类
+from function.func_summary import MessageSummary
+from function.func_reminder import ReminderManager
 from function.func_persona import (
     PersonaManager,
     fetch_persona_for_context,
     handle_persona_command,
-)  # 导入人设相关工具
+    build_persona_system_prompt,
+)
 from configuration import Config
 from constants import ChatType
 from job_mgmt import Job
@@ -32,11 +34,16 @@ from function.func_xml_process import XmlProcessor
 
 # 导入上下文及常用处理函数
 from commands.context import MessageContext
-from commands.handlers import handle_chitchat  # 导入闲聊处理函数
+from commands.handlers import handle_chitchat  # 保留旧接口用于兼容
 from commands.keyword_triggers import KeywordTriggerProcessor
 from commands.message_forwarder import MessageForwarder
 
-__version__ = "39.2.4.0"
+# 导入新的 Agent 系统
+from agent import AgentLoop, AgentContext
+from agent.tools import create_default_registry, ToolRegistry
+from session import SessionManager
+
+__version__ = "39.3.0.0"  # 升级版本号
 
 
 class Robot(Job):
@@ -286,6 +293,12 @@ class Robot(Job):
         )
         forwarding_conf = getattr(self.config, "MESSAGE_FORWARDING", {})
         self.message_forwarder = MessageForwarder(self, forwarding_conf, self.LOG)
+
+        # 初始化 Agent Loop 系统
+        self.tool_registry = create_default_registry()
+        self.agent_loop = AgentLoop(self.tool_registry, max_iterations=20)
+        self.session_manager = SessionManager(self.message_summary, self.wxid)
+        self.LOG.info(f"Agent Loop 系统已初始化，工具: {self.tool_registry.get_tool_names()}")
         
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -301,24 +314,27 @@ class Robot(Job):
         return room_id in enabled_groups
 
     def processMsg(self, msg: WxMsg) -> None:
+        """同步入口 - 创建异步任务处理消息"""
+        asyncio.run(self.process_msg_async(msg))
+
+    async def process_msg_async(self, msg: WxMsg) -> None:
         """
-        处理收到的微信消息
+        异步处理收到的微信消息
         :param msg: 微信消息对象
         """
         try:
-            # 1. 使用MessageSummary记录消息(保持不变)
+            # 1. 使用MessageSummary记录消息
             self.message_summary.process_message_from_wxmsg(msg, self.wcf, self.allContacts, self.wxid)
-            
+
             # 2. 根据消息来源选择使用的AI模型
             self._select_model_for_message(msg)
-            
+
             # 3. 获取本次对话特定的历史消息限制
             specific_limit = self._get_specific_history_limit(msg)
             self.LOG.debug(f"本次对话 ({msg.sender} in {msg.roomid or msg.sender}) 使用历史限制: {specific_limit}")
-            
+
             # 4. 预处理消息，生成MessageContext
             ctx = self.preprocess(msg)
-            # 确保context能访问到当前选定的chat模型及特定历史限制
             setattr(ctx, 'chat', self.chat)
             setattr(ctx, 'specific_max_history', specific_limit)
             persona_text = fetch_persona_for_context(self, ctx)
@@ -326,7 +342,6 @@ class Robot(Job):
             group_enabled = ctx.is_group and self._is_group_enabled(msg.roomid)
             setattr(ctx, 'group_enabled', group_enabled)
 
-            # 检查是否配置了 force_reasoning（闲聊时强制使用推理模型，AI路由仍正常执行）
             force_reasoning = getattr(self, '_current_force_reasoning', False)
             setattr(ctx, 'force_reasoning', force_reasoning)
 
@@ -344,10 +359,7 @@ class Robot(Job):
                 except Exception as forward_error:
                     self.LOG.error(f"消息转发失败: {forward_error}", exc_info=True)
 
-            if ctx.is_group and not group_enabled:
-                persona_allowed = False
-            else:
-                persona_allowed = True
+            persona_allowed = not (ctx.is_group and not group_enabled)
 
             if persona_allowed and handle_persona_command(self, ctx):
                 return
@@ -358,7 +370,7 @@ class Robot(Job):
 
             if ctx.reasoning_requested:
                 self.LOG.info("检测到推理模式触发词，直接进入推理模式。")
-                self._handle_chitchat(ctx, None)
+                await self._handle_chitchat_async(ctx)
                 return
 
             # 5. 特殊消息处理（非 AI 决策）
@@ -381,7 +393,7 @@ class Robot(Job):
                         inviter = new_member_match.group(1)
                         new_member = new_member_match.group(2)
                         welcome_msg = self.config.WELCOME_MSG.format(new_member=new_member, inviter=inviter)
-                        self.sendTextMsg(welcome_msg, msg.roomid)
+                        await self.send_text_async(welcome_msg, msg.roomid)
                 return
 
             if msg.type == 10000 and "你已添加了" in msg.content:
@@ -392,7 +404,7 @@ class Robot(Job):
             # 6.1 群聊：@机器人 或 随机插嘴
             if msg.from_group() and msg.roomid in self.config.GROUPS:
                 if msg.is_at(self.wxid):
-                    self._handle_chitchat(ctx, None)
+                    await self._handle_chitchat_async(ctx)
                 else:
                     can_auto_reply = (
                         not msg.from_self()
@@ -408,14 +420,14 @@ class Robot(Job):
                                     f"触发群聊主动闲聊: 群={msg.roomid}, 概率={rate:.2f}, 随机值={rand_val:.2f}"
                                 )
                                 setattr(ctx, 'auto_random_reply', True)
-                                self._handle_chitchat(ctx, None)
+                                await self._handle_chitchat_async(ctx)
                                 self._apply_group_random_reply_decay(msg.roomid)
 
             # 6.2 私聊
             elif not msg.from_group() and not msg.from_self():
                 if msg.type == 1 or (msg.type == 49 and ctx.text):
-                    self._handle_chitchat(ctx, None)
-                    
+                    await self._handle_chitchat_async(ctx)
+
         except Exception as e:
             self.LOG.error(f"处理消息时发生错误: {str(e)}", exc_info=True)
 
@@ -438,15 +450,15 @@ class Robot(Job):
         Thread(target=innerProcessMsg, name="GetMessage", args=(self.wcf,), daemon=True).start()
 
     def sendTextMsg(self, msg: str, receiver: str, at_list: str = "", record_message: bool = True) -> None:
-        """ 发送消息并记录
+        """ 发送消息并记录（同步版本）
         :param msg: 消息字符串
         :param receiver: 接收人wxid或者群id
         :param at_list: 要@的wxid, @所有人的wxid为：notify@all
         :param record_message: 是否将本条消息写入消息历史
         """
-        # 延迟和频率限制 (逻辑不变)
-        time.sleep(float(str(time.time()).split('.')[-1][-2:]) / 100.0 + 0.3)
-        now = time.time()
+        # 延迟和频率限制
+        time_mod.sleep(float(str(time_mod.time()).split('.')[-1][-2:]) / 100.0 + 0.3)
+        now = time_mod.time()
         if self.config.SEND_RATE_LIMIT > 0:
             self._msg_timestamps = [t for t in self._msg_timestamps if now - t < 60]
             if len(self._msg_timestamps) >= self.config.SEND_RATE_LIMIT:
@@ -454,20 +466,19 @@ class Robot(Job):
                 return
             self._msg_timestamps.append(now)
 
-        # 去除 Markdown 粗体标记，避免微信端出现多余符号
+        # 去除 Markdown 粗体标记
         msg = msg.replace("**", "")
         ats = ""
-        message_to_send = msg # 保存清理后的消息用于记录
+        message_to_send = msg
         if at_list:
             if at_list == "notify@all":
                 ats = " @所有人"
             else:
                 wxids = at_list.split(",")
-                for wxid_at in wxids: # Renamed variable
+                for wxid_at in wxids:
                     ats += f" @{self.wcf.get_alias_in_chatroom(wxid_at, receiver)}"
 
         try:
-            # 发送消息 (逻辑不变)
             if ats == "":
                 self.LOG.info(f"To {receiver}: {msg}")
                 self.wcf.send_text(f"{msg}", receiver, at_list)
@@ -476,24 +487,26 @@ class Robot(Job):
                 self.LOG.info(f"To {receiver}:\n{ats}\n{msg}")
                 self.wcf.send_text(full_msg_content, receiver, at_list)
 
-            if self.message_summary:
-                if record_message:  # 仅在需要时记录消息
-                    # 确定机器人的名字
-                    robot_name = self.allContacts.get(self.wxid, "机器人")
-                    # 使用 self.wxid 作为 sender_wxid
-                    # 注意：这里不生成时间戳，让 record_message 内部生成
-                    self.message_summary.record_message(
-                        chat_id=receiver,
-                        sender_name=robot_name,
-                        sender_wxid=self.wxid, # 传入机器人自己的 wxid
-                        content=message_to_send
-                    )
-                    self.LOG.debug(f"已记录机器人发送的消息到 {receiver}")
-            else:
+            if self.message_summary and record_message:
+                robot_name = self.allContacts.get(self.wxid, "机器人")
+                self.message_summary.record_message(
+                    chat_id=receiver,
+                    sender_name=robot_name,
+                    sender_wxid=self.wxid,
+                    content=message_to_send
+                )
+                self.LOG.debug(f"已记录机器人发送的消息到 {receiver}")
+            elif not self.message_summary:
                 self.LOG.warning("MessageSummary 未初始化，无法记录发送的消息")
 
         except Exception as e:
             self.LOG.error(f"发送消息失败: {e}")
+
+    async def send_text_async(
+        self, msg: str, receiver: str, at_list: str = "", record_message: bool = True
+    ) -> None:
+        """异步发送消息"""
+        await asyncio.to_thread(self.sendTextMsg, msg, receiver, at_list, record_message)
 
     def getAllContacts(self) -> dict:
         """
@@ -636,8 +649,176 @@ class Robot(Job):
             return [int(x) for x in raw if isinstance(x, (int, float, str))]
         return []
 
+    async def _handle_chitchat_async(self, ctx, auto_random_reply: bool = False) -> bool:
+        """异步处理闲聊 - 使用 Agent Loop 架构"""
+        force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
+        reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
+        is_auto_random_reply = bool(getattr(ctx, 'auto_random_reply', False))
+
+        # 选择模型
+        chat_model = getattr(ctx, 'chat', None) or self.chat
+        if reasoning_requested:
+            if force_reasoning:
+                self.LOG.info("群配置了 force_reasoning，将使用推理模型。")
+            else:
+                self.LOG.info("检测到推理模式请求，将启用深度思考。")
+                await self.send_text_async("正在深度思考，请稍候...", ctx.get_receiver(), record_message=False)
+            reasoning_chat = self._get_reasoning_chat_model()
+            if reasoning_chat:
+                chat_model = reasoning_chat
+            else:
+                self.LOG.warning("当前模型未配置推理模型，使用默认模型")
+
+        if not chat_model:
+            self.LOG.error("没有可用的AI模型")
+            await self.send_text_async("抱歉，我现在无法进行对话。", ctx.get_receiver())
+            return False
+
+        # 获取历史消息限制
+        specific_max_history = getattr(ctx, 'specific_max_history', 30)
+        if specific_max_history is None:
+            specific_max_history = 30
+
+        # 获取或创建会话
+        chat_id = ctx.get_receiver()
+        session_key = f"wechat:{chat_id}"
+        session = self.session_manager.get_or_create(session_key, max_history=specific_max_history)
+
+        # 构建用户消息
+        sender_name = ctx.sender_name
+        content = ctx.text
+
+        # 格式化消息
+        if self.xml_processor:
+            if ctx.is_group:
+                msg_data = self.xml_processor.extract_quoted_message(ctx.msg)
+            else:
+                msg_data = self.xml_processor.extract_private_quoted_message(ctx.msg)
+            q_with_info = self.xml_processor.format_message_for_ai(msg_data, sender_name)
+            if not q_with_info:
+                current_time = time_mod.strftime("%H:%M", time_mod.localtime())
+                q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
+        else:
+            current_time = time_mod.strftime("%H:%M", time_mod.localtime())
+            q_with_info = f"[{current_time}] {sender_name}: {content or '[空内容]'}"
+
+        # 构建提示词
+        if ctx.is_group and not ctx.is_at_bot and is_auto_random_reply:
+            latest_message_prompt = (
+                "# 群聊插话提醒\n"
+                "你目前是在群聊里主动接话，没有人点名让你发言。\n"
+                "请根据下面这句（或者你任选一句）最新消息插入一条自然、不突兀的中文回复：\n"
+                f"「{q_with_info}」\n"
+                "不要重复任何已知的内容，提出新的思维碰撞，也不要显得过于正式。"
+            )
+        else:
+            latest_message_prompt = (
+                "# 本轮需要回复的用户及其最新信息\n"
+                "请你基于下面这条最新收到的用户讯息直接进行自然的中文回复：\n"
+                f"「{q_with_info}」\n"
+                "请只针对该用户进行回复。"
+            )
+
+        # 构建系统提示
+        persona_text = getattr(ctx, 'persona', None)
+        tool_guidance = ""
+        if not is_auto_random_reply:
+            tool_guidance = (
+                "\n\n## 工具使用指引\n"
+                "你可以调用工具来辅助回答，以下是决策原则：\n"
+                "- 用户询问需要最新信息、实时数据、或你不确定的事实 → 调用 web_search\n"
+                "- 用户想设置/查看/删除提醒 → 调用 reminder_create / reminder_list / reminder_delete\n"
+                "- 用户提到之前聊过的内容、或你需要回顾更早的对话 → 调用 lookup_chat_history\n"
+                "- 日常闲聊、观点讨论、情感交流 → 直接回复，不需要调用任何工具\n"
+                "你可以在一次对话中多次调用工具。"
+            )
+
+        if persona_text:
+            try:
+                base_prompt = build_persona_system_prompt(chat_model, persona_text)
+                system_prompt = base_prompt + tool_guidance if base_prompt else tool_guidance or None
+            except Exception as persona_exc:
+                self.LOG.error(f"构建人设系统提示失败: {persona_exc}", exc_info=True)
+                system_prompt = tool_guidance or None
+        else:
+            system_prompt = tool_guidance if tool_guidance else None
+
+        # 构建消息列表
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        # 添加当前时间
+        now_time = time_mod.strftime("%Y-%m-%d %H:%M:%S", time_mod.localtime())
+        messages.append({"role": "system", "content": f"Current time is: {now_time}"})
+
+        # 添加历史消息
+        history = session.get_history(specific_max_history)
+        for msg in history:
+            role = msg.get("role", "user")
+            msg_content = msg.get("content", "")
+            if msg_content and role in ("user", "assistant"):
+                messages.append({"role": role, "content": msg_content})
+
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": latest_message_prompt})
+
+        # 创建 AgentContext
+        async def send_text_func(content: str, at_list: str, record_message: bool):
+            await self.send_text_async(content, chat_id, at_list, record_message)
+
+        agent_ctx = AgentContext(
+            session=session,
+            chat_id=chat_id,
+            sender_wxid=ctx.msg.sender,
+            sender_name=sender_name,
+            robot_wxid=self.wxid,
+            is_group=ctx.is_group,
+            robot=self,
+            logger=self.LOG,
+            config=self.config,
+            specific_max_history=specific_max_history,
+            persona=persona_text,
+            _send_text_func=send_text_func,
+        )
+
+        # 决定是否使用工具
+        tools = self.tool_registry if not is_auto_random_reply else None
+
+        try:
+            if tools:
+                # 使用 Agent Loop
+                self.LOG.info(f"Agent Loop 启动，工具: {tools.get_tool_names()}")
+                response = await self.agent_loop.run(
+                    provider=chat_model,
+                    messages=messages,
+                    ctx=agent_ctx,
+                )
+            else:
+                # 直接调用 LLM（无工具）
+                llm_response = await chat_model.chat(messages, tools=None)
+                response = llm_response.content
+
+            if response:
+                await self.send_text_async(response, chat_id)
+                # 更新会话历史
+                session.add_message("user", latest_message_prompt)
+                session.add_message("assistant", response)
+                return True
+            else:
+                self.LOG.error("无法从AI获得答案")
+                return False
+
+        except Exception as e:
+            self.LOG.error(f"Agent Loop 执行失败: {e}", exc_info=True)
+            if reasoning_requested:
+                await self.send_text_async("抱歉，深度思考暂时遇到问题，请稍后再试。", chat_id)
+            else:
+                await self.send_text_async("抱歉，服务暂时不可用，请稍后再试。", chat_id)
+            return False
+
     def _handle_chitchat(self, ctx, match=None):
-        """统一处理消息，支持推理模式切换和模型 Fallback。"""
+        """同步版本 - 保持向后兼容，内部调用旧逻辑"""
         force_reasoning = bool(getattr(ctx, 'force_reasoning', False))
         reasoning_requested = bool(getattr(ctx, 'reasoning_requested', False)) or force_reasoning
         original_chat = getattr(ctx, 'chat', None)

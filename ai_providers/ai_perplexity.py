@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import asyncio
 import json
 import logging
 import re
@@ -9,6 +10,8 @@ from typing import Optional, Dict, Callable, List
 import os
 from threading import Thread, Lock
 from openai import OpenAI
+
+from providers.base import LLMProvider, LLMResponse, ToolCall
 
 
 class PerplexityThread(Thread):
@@ -295,7 +298,7 @@ class PerplexityManager:
         self.LOG.info("Perplexity线程管理已清理")
 
 
-class Perplexity:
+class Perplexity(LLMProvider):
     def __init__(self, config):
         self.config = config
         self.api_key = config.get('key')
@@ -452,6 +455,35 @@ class Perplexity:
     def cleanup(self):
         """清理所有资源"""
         self.thread_manager.cleanup_threads()
-            
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """异步调用 LLM（实现 LLMProvider 接口）
+
+        注意：Perplexity 不支持工具调用，tools 参数会被忽略
+        """
+        if not self.api_key or not self.client:
+            return LLMResponse(content="Perplexity API key 未配置或客户端初始化失败")
+
+        try:
+            model = self.model_flash or self.config.get("model", "sonar")
+
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=model,
+                messages=messages,
+            )
+
+            content = response.choices[0].message.content
+            # Perplexity 不支持工具调用
+            return LLMResponse(content=content, tool_calls=[])
+
+        except Exception as e:
+            self.LOG.error(f"Perplexity API 调用失败: {e}")
+            return LLMResponse(content=f"发生错误: {str(e)}")
+
     def __str__(self):
         return "Perplexity" 
