@@ -3,7 +3,16 @@ import re
 import html
 import time
 import xml.etree.ElementTree as ET
-from wcferry import WxMsg
+from typing import TYPE_CHECKING, Any
+
+# wcferry 仅在 Windows 可用
+try:
+    from wcferry import WxMsg
+except ImportError:
+    WxMsg = None
+
+if TYPE_CHECKING:
+    from wcferry import WxMsg as WxMsgType
 
 class XmlProcessor:
     """处理微信消息XML解析的工具类"""
@@ -16,7 +25,7 @@ class XmlProcessor:
         """
         self.logger = logger or logging.getLogger("XmlProcessor")
     
-    def extract_quoted_message(self, msg: WxMsg) -> dict:
+    def extract_quoted_message(self, msg: Any) -> dict:
         """从微信消息中提取引用内容
         
         Args:
@@ -210,7 +219,7 @@ class XmlProcessor:
             self.logger.error(f"处理群聊引用消息时出错: {e}")
             return result
     
-    def extract_private_quoted_message(self, msg: WxMsg) -> dict:
+    def extract_private_quoted_message(self, msg: Any) -> dict:
         """专门处理私聊引用消息，返回结构化数据
         
         Args:
