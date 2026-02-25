@@ -16,7 +16,6 @@ from wcferry import Wcf, WxMsg
 from ai_providers.ai_chatgpt import ChatGPT
 from ai_providers.ai_deepseek import DeepSeek
 from ai_providers.ai_kimi import Kimi
-from ai_providers.ai_perplexity import Perplexity
 from function.func_weather import Weather
 from function.func_news import News
 from function.func_summary import MessageSummary
@@ -190,27 +189,7 @@ class Robot(Job):
                     self.LOG.info(f"已加载 Kimi 推理模型: {reasoning_model_name}")
             except Exception as e:
                 self.LOG.error(f"初始化 Kimi 模型时出错: {str(e)}")
-        
-            
-        # 初始化Perplexity
-        if Perplexity.value_check(self.config.PERPLEXITY):
-            try:
-                perplexity_flash_conf = copy.deepcopy(self.config.PERPLEXITY)
-                flash_model_name = perplexity_flash_conf.get("model_flash", "sonar")
-                perplexity_flash_conf["model"] = flash_model_name
-                self.chat_models[ChatType.PERPLEXITY.value] = Perplexity(perplexity_flash_conf)
-                self.perplexity = self.chat_models[ChatType.PERPLEXITY.value]  # 单独保存一个引用用于特殊处理
-                self.LOG.info(f"已加载 Perplexity 模型: {flash_model_name}")
 
-                reasoning_model_name = self.config.PERPLEXITY.get("model_reasoning")
-                if reasoning_model_name and reasoning_model_name != flash_model_name:
-                    perplexity_reason_conf = copy.deepcopy(self.config.PERPLEXITY)
-                    perplexity_reason_conf["model"] = reasoning_model_name
-                    self.reasoning_chat_models[ChatType.PERPLEXITY.value] = Perplexity(perplexity_reason_conf)
-                    self.LOG.info(f"已加载 Perplexity 推理模型: {reasoning_model_name}")
-            except Exception as e:
-                self.LOG.error(f"初始化 Perplexity 模型时出错: {str(e)}")
-            
         # 根据chat_type参数选择默认模型
         self.current_model_id = None
         if chat_type > 0 and chat_type in self.chat_models:
@@ -586,20 +565,10 @@ class Robot(Job):
         for r in receivers:
             self.sendTextMsg(report, r)
 
-    def cleanup_perplexity_threads(self):
-        """清理所有Perplexity线程"""
-        # 如果已初始化Perplexity实例，调用其清理方法
-        perplexity_instance = self.get_perplexity_instance()
-        if perplexity_instance:
-            perplexity_instance.cleanup()
-                
     def cleanup(self):
         """清理所有资源，在程序退出前调用"""
         self.LOG.info("开始清理机器人资源...")
-        
-        # 清理Perplexity线程
-        self.cleanup_perplexity_threads()
-        
+
         # 关闭消息历史数据库连接
         if hasattr(self, 'message_summary') and self.message_summary:
             self.LOG.info("正在关闭消息历史数据库...")
@@ -610,34 +579,9 @@ class Robot(Job):
                 self.persona_manager.close()
             except Exception as e:
                 self.LOG.error(f"关闭人设数据库时出错: {e}")
-        
+
         self.LOG.info("机器人资源清理完成")
-                
-    def get_perplexity_instance(self):
-        """获取Perplexity实例
-        
-        Returns:
-            Perplexity: Perplexity实例，如果未配置则返回None
-        """
-        # 检查是否已有Perplexity实例
-        if hasattr(self, 'perplexity'):
-            return self.perplexity
-            
-        # 检查config中是否有Perplexity配置
-        if hasattr(self.config, 'PERPLEXITY') and Perplexity.value_check(self.config.PERPLEXITY):
-            self.perplexity = Perplexity(self.config.PERPLEXITY)
-            return self.perplexity
-            
-        # 检查chat是否是Perplexity类型
-        if isinstance(self.chat, Perplexity):
-            return self.chat
-            
-        # 如果存在chat_models字典，尝试从中获取
-        if hasattr(self, 'chat_models') and ChatType.PERPLEXITY.value in self.chat_models:
-            return self.chat_models[ChatType.PERPLEXITY.value]
-            
-        return None
-    
+
     def _get_reasoning_chat_model(self):
         """获取当前聊天模型对应的推理模型实例"""
         model_id = getattr(self, 'current_model_id', None)

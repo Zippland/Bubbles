@@ -16,10 +16,10 @@ __all__ = [
 ]
 
 
-def create_default_registry() -> ToolRegistry:
+def create_default_registry(tavily_api_key: str | None = None) -> ToolRegistry:
     """创建包含所有默认工具的注册表"""
     registry = ToolRegistry()
-    registry.register(WebSearchTool())
+    registry.register(WebSearchTool(api_key=tavily_api_key))
     registry.register(ReminderCreateTool())
     registry.register(ReminderListTool())
     registry.register(ReminderDeleteTool())

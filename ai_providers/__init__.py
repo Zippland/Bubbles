@@ -7,6 +7,5 @@ AI Providers Module
 from .ai_chatgpt import ChatGPT
 from .ai_deepseek import DeepSeek
 from .ai_kimi import Kimi
-from .ai_perplexity import Perplexity
 
-__all__ = ["ChatGPT", "DeepSeek", "Kimi", "Perplexity"]
+__all__ = ["ChatGPT", "DeepSeek", "Kimi"]

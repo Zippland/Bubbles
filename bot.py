@@ -12,7 +12,6 @@ from channel import Channel, Message, MessageType
 from ai_providers.ai_chatgpt import ChatGPT
 from ai_providers.ai_deepseek import DeepSeek
 from ai_providers.ai_kimi import Kimi
-from ai_providers.ai_perplexity import Perplexity
 from function.func_summary import MessageSummary
 from function.func_reminder import ReminderManager
 from function.func_persona import (
@@ -87,7 +86,8 @@ class BubblesBot:
             self.persona_manager = None
 
         # 初始化 Agent Loop 系统
-        self.tool_registry = create_default_registry()
+        tavily_key = getattr(self.config, "TAVILY", {}).get("key") if hasattr(self.config, "TAVILY") else None
+        self.tool_registry = create_default_registry(tavily_api_key=tavily_key)
         self.agent_loop = AgentLoop(self.tool_registry, max_iterations=20)
         self.session_manager = SessionManager(
             message_summary=self.message_summary,
@@ -185,24 +185,6 @@ class BubblesBot:
                     self.LOG.info(f"已加载 Kimi 推理模型: {reasoning_model}")
             except Exception as e:
                 self.LOG.error(f"初始化 Kimi 失败: {e}")
-
-        # Perplexity
-        if Perplexity.value_check(self.config.PERPLEXITY):
-            try:
-                flash_conf = copy.deepcopy(self.config.PERPLEXITY)
-                flash_model = flash_conf.get("model_flash", "sonar")
-                flash_conf["model"] = flash_model
-                self.chat_models[ChatType.PERPLEXITY.value] = Perplexity(flash_conf)
-                self.LOG.info(f"已加载 Perplexity: {flash_model}")
-
-                reasoning_model = self.config.PERPLEXITY.get("model_reasoning")
-                if reasoning_model and reasoning_model != flash_model:
-                    reason_conf = copy.deepcopy(self.config.PERPLEXITY)
-                    reason_conf["model"] = reasoning_model
-                    self.reasoning_chat_models[ChatType.PERPLEXITY.value] = Perplexity(reason_conf)
-                    self.LOG.info(f"已加载 Perplexity 推理模型: {reasoning_model}")
-            except Exception as e:
-                self.LOG.error(f"初始化 Perplexity 失败: {e}")
 
     async def start(self) -> None:
         """启动机器人"""

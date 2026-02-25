@@ -1,162 +1,51 @@
+# Bubbles 配置文件
+# 复制此文件为 config.yaml 并填写 API Key
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AI 模型（至少配置一个）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+chatgpt:
+  key:                              # OpenAI API Key
+  api: https://api.openai.com/v1
+  model_flash: gpt-4o-mini
+  model_reasoning: gpt-4o
+  proxy:                            # 代理（可选）
+
+deepseek:
+  key:                              # DeepSeek API Key
+  api: https://api.deepseek.com
+  model_flash: deepseek-chat
+  model_reasoning: deepseek-reasoner
+
+kimi:
+  key:                              # Moonshot API Key
+  api: https://api.moonshot.cn/v1
+  model_flash: kimi-k2
+  model_reasoning: kimi-k2-thinking
+
+# 搜索工具
+tavily:
+  key:                              # Tavily API Key (https://tavily.com)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 其他
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+send_rate_limit: 10                 # 每分钟最大发送数
+
 logging:
   version: 1
-  disable_existing_loggers: False
-
+  disable_existing_loggers: false
   formatters:
     simple:
-      format: "%(asctime)s %(message)s"
-      datefmt: "%Y-%m-%d %H:%M:%S"
-    error:
-      format: "%(asctime)s %(name)s %(levelname)s %(filename)s::%(funcName)s[%(lineno)d]:%(message)s"
-
+      format: "%(asctime)s [%(levelname)s] %(message)s"
+      datefmt: "%H:%M:%S"
   handlers:
     console:
       class: logging.StreamHandler
       level: INFO
       formatter: simple
-      stream: ext://sys.stdout
-
-    info_file_handler:
-      class: logging.handlers.RotatingFileHandler
-      level: INFO
-      formatter: simple
-      filename: wx_info.log
-      maxBytes: 10485760  # 10MB
-      backupCount: 20
-      encoding: utf8
-
-    warning_file_handler:
-      class: logging.handlers.RotatingFileHandler
-      level: WARNING
-      formatter: simple
-      filename: wx_warning.log
-      maxBytes: 10485760  # 10MB
-      backupCount: 20
-      encoding: utf8
-
-    error_file_handler:
-      class: logging.handlers.RotatingFileHandler
-      level: ERROR
-      formatter: error
-      filename: wx_error.log
-      maxBytes: 10485760  # 10MB
-      backupCount: 20
-      encoding: utf8
-
   root:
     level: INFO
-    handlers: [console, info_file_handler, error_file_handler]
-
-groups:
-  enable: [example12345@chatroom,example12345@chatroom]  # 允许响应的群 roomId，大概长这样：2xxxxxxxxx3@chatroom
-  welcome_msg: "欢迎 {new_member} 加入群聊！\n请简单介绍一下自己吧~\n如果想和我聊天，可以@我"  # 新人入群欢迎消息，可使用{new_member}和{inviter}变量
-  # 群聊与AI模型映射，如果不配置则使用默认模型
-  models:
-    # 模型ID参考：
-    # 0: 自动选择第一个可用模型
-    # 1: ChatGPT
-    # 2: DeepSeek
-    # 3: Kimi
-    # 4: Perplexity
-    default: 0  # 默认模型ID（0表示自动选择第一个可用模型）
-    # 群聊映射
-    mapping:
-      - room_id: example12345@chatroom
-        model: 2  
-        max_history: 30  # 回顾最近30条消息
-        random_chitchat_probability: 0.2  # 群聊随机闲聊概率（0-1），0 表示关闭
-        force_reasoning: true  # 闲聊时强制使用推理模型（AI 路由仍正常执行） 
-
-      - room_id: example12345@chatroom 
-        model: 7  
-        max_history: 30  # 回顾最近30条消息
-        random_chitchat_probability: 0.0  # 可单独覆盖默认概率
-
-    # 私聊映射
-    private_mapping:
-      - wxid: filehelper
-        model: 2  
-        max_history: 30  # 回顾最近30条消息
-        
-      - wxid: wxid_example12345
-        model: 8 
-        max_history: 30  # 回顾最近30条消息
-
-message_forwarding:
-  enable: false  # 是否开启转发功能
-  rules:
-    - source_room_id: example12345@chatroom  # 需要监听的群ID
-      target_room_ids:
-        - example67890@chatroom  # 接受转发消息的群ID
-      keywords:
-        - "关键词1"
-        - "关键词2"
-    # - source_room_id: another_group@chatroom
-    #   target_room_ids: ["target_group@chatroom"]
-    #   keywords: ["需要的词"]
-
-MAX_HISTORY: 300 # 记录数据库的消息历史
-
-news:
-  receivers: ["filehelper"]  # 定时新闻接收人（roomid 或者 wxid）
-
-# 消息发送速率限制：一分钟内最多发送6条消息
-send_rate_limit: 6
-
-weather:  # -----天气提醒配置这行不填-----
-  city_code: 101010100 # 北京城市代码，如若需要其他城市，可参考base/main_city.json或者自寻城市代码填写
-  receivers: ["filehelper"]  # 天气提醒接收人（roomid 或者 wxid）
-
-chatgpt:  # -----chatgpt配置这行不填-----
-  key:  # 填写你 ChatGPT 的 key
-  api: https://api.openai.com/v1  # 如果你不知道这是干嘛的，就不要改
-  model_flash: gpt-3.5-turbo  # 快速回复模型（可选）
-  model_reasoning: gpt-3.5-turbo  # 深度思考模型（可选）
-  proxy:  # 如果你在国内，你可能需要魔法，大概长这样：http://域名或者IP地址:端口号
-  prompt: 你是智能聊天机器人，你叫 wcferry  # 根据需要对角色进行设定
-  max_history_messages: 20 # <--- 添加这一行，设置 ChatGPT 最多回顾 20 条历史消息
-
-deepseek:  # -----deepseek配置这行不填-----
-  #思维链相关功能默认关闭，开启后会增加响应时间和消耗更多的token
-  key:  # 填写你的 DeepSeek API Key API Key的格式为sk-xxxxxxxxxxxxxxx
-  api: https://api.deepseek.com  # DeepSeek API 地址
-  model_flash: deepseek-chat  # 快速回复模型
-  model_reasoning: deepseek-reasoner  # 深度思考模型
-  prompt: 你是智能聊天机器人，你叫 DeepSeek 助手  # 根据需要对角色进行设定
-  enable_reasoning: false  # 是否启用思维链功能，仅在使用 deepseek-reasoner 模型时有效
-  show_reasoning: false  # 是否在回复中显示思维过程，仅在启用思维链功能时有效
-  max_history_messages: 10 # <--- 添加这一行，设置 DeepSeek 最多回顾 10 条历史消息
-
-kimi:  # -----kimi配置-----
-  key:  # 填写你的 Moonshot API Key
-  api: https://api.moonshot.cn/v1  # Kimi API 地址
-  proxy:  # 国内可按需配置代理，例如：http://127.0.0.1:7890
-  model_flash: kimi-k2  # 快速回复模型
-  model_reasoning: kimi-k2-thinking  # 深度思考模型
-  prompt: 你是 Kimi，一个由 Moonshot AI 构建的可靠助手  # 角色设定
-  max_history_messages: 20  # 设置 Kimi 最多回顾 20 条历史消息
-  show_reasoning: false  # 是否在回复中附带 reasoning_content 内容
-
-aliyun_image:  # -----如果要使用阿里云文生图，取消下面的注释并填写相关内容，模型到阿里云百炼找通义万相-文生图2.1-Turbo-----
-  enable: true  # 是否启用阿里文生图功能，false为关闭，默认开启，如果未配置，则会将消息发送给聊天大模型
-  api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxx  # 替换为你的DashScope API密钥
-  model: wanx2.1-t2i-turbo  # 模型名称，默认使用wanx2.1-t2i-turbo(快),wanx2.1-t2i-plus（中）,wanx-v1（慢），会给用户不同的提示！
-  size: 1024*1024  # 图像尺寸，格式为宽*高
-  n: 1  # 生成图像的数量
-  temp_dir: ./temp  # 临时文件存储路径
-  trigger_keyword: 牛阿里  # 触发词，默认为"牛阿里"
-  fallback_to_chat: true  # 当服务不可用时是否转发给聊天模型处理
-
-perplexity:  # -----perplexity配置这行不填-----
-  key:  # 填写你的Perplexity API Key
-  api: https://api.perplexity.ai  # API地址
-  proxy:  # 如果你在国内，你可能需要魔法，大概长这样：http://域名或者IP地址:端口号
-  model_flash: mixtral-8x7b-instruct  # 快速回复模型（可选）
-  model_reasoning: mixtral-8x7b-instruct  # 深度思考模型（可选）
-  prompt: 你是Perplexity AI助手，请用专业、准确、有帮助的方式回答问题  # 角色设定
-
-ai_router:  # -----AI路由器配置-----
-  enable: true  # 是否启用AI路由功能
-  allowed_groups: []  # 允许使用AI路由的群聊ID列表，例如：["123456789@chatroom", "123456789@chatroom"]
-
-auto_accept_friend_request: false  # 是否自动通过好友申请，默认关闭
+    handlers: [console]

@@ -7,14 +7,12 @@ class ChatType(IntEnum):
     CHATGPT = 1  # ChatGPT
     DEEPSEEK = 2  # DeepSeek
     KIMI = 3  # Kimi (Moonshot)
-    PERPLEXITY = 4  # Perplexity
 
     @staticmethod
     def is_in_chat_types(chat_type: int) -> bool:
         if chat_type in [ChatType.CHATGPT.value,
                         ChatType.DEEPSEEK.value,
-                        ChatType.KIMI.value,
-                        ChatType.PERPLEXITY.value]:
+                        ChatType.KIMI.value]:
             return True
         return False
 
