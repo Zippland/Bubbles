@@ -1,3 +1,5 @@
+> 2026年2月27日起，本项目被高阶项目 [Bubblebot](https://github.com/Zippland/Bubblebot) 取代，不再更新，如有兴趣可以前往[Bubblebot](https://github.com/Zippland/Bubblebot) 项目。
+
 <div align="center">
 
 # 🫧 Bubbles - WechatAI 🫧
