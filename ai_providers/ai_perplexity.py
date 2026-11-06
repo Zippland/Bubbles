@@ -8,6 +8,7 @@ import time
 from typing import Optional, Dict, Callable, List
 import os
 from threading import Thread, Lock
+from urllib.parse import urlparse
 from openai import OpenAI
 
 
@@ -321,9 +322,14 @@ class Perplexity:
         self.client = None
         if self.api_key:
             try:
+                # 仅在官方 Perplexity API 主机上发送集成标识头
+                default_headers = None
+                if (urlparse(self.api_base or '').hostname or '').lower() == 'api.perplexity.ai':
+                    default_headers = {'X-Pplx-Integration': 'bubbles'}
                 self.client = OpenAI(
                     api_key=self.api_key,
-                    base_url=self.api_base
+                    base_url=self.api_base,
+                    default_headers=default_headers
                 )
                 # 如果有代理设置
                 if self.proxy:
